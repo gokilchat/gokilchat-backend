@@ -1,8 +1,9 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const cors = require('cors');
-require('dotenv').config();
+import express from 'express';
+import http from 'http';
+import { Server } from 'socket.io';
+import cors from 'cors';
+import dotenv from 'dotenv';
+dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
@@ -13,7 +14,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-const authRoutes = require('./routes/auth');
+import authRoutes from './routes/auth.js';
 app.use('/auth', authRoutes);
 
 

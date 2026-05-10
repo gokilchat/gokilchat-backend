@@ -1,7 +1,7 @@
-const express = require('express');
-const { OAuth2Client } = require('google-auth-library');
-const { supabaseAdmin } = require('../utils/supabase');
-const jwt = require('jsonwebtoken');
+import express from 'express';
+import { OAuth2Client } from 'google-auth-library';
+import { supabaseAdmin } from '../utils/supabase.js';
+import jwt from 'jsonwebtoken';
 
 const router = express.Router();
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -106,4 +106,4 @@ router.post('/google', async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

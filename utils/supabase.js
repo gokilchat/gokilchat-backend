@@ -1,4 +1,4 @@
-const { createClient } = require('@supabase/supabase-js');
+import { createClient } from '@supabase/supabase-js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -19,4 +19,4 @@ const supabaseUser = (token) => {
   );
 };
 
-module.exports = { supabaseAdmin, supabaseUser };
+export { supabaseAdmin, supabaseUser };
