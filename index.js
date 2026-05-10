@@ -13,6 +13,10 @@ app.use(cors({
 }));
 app.use(express.json());
 
+const authRoutes = require('./routes/auth');
+app.use('/auth', authRoutes);
+
+
 const io = new Server(server, {
   cors: {
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
