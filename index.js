@@ -15,7 +15,12 @@ app.use(cors({
 app.use(express.json());
 
 import authRoutes from './routes/auth.js';
+import roomRoutes from './routes/rooms.js';
+import { socketAuthMiddleware } from './middlewares/auth.js';
+import { supabaseAdmin } from './utils/supabase.js';
+
 app.use('/auth', authRoutes);
+app.use('/rooms', roomRoutes);
 
 
 const io = new Server(server, {
@@ -26,11 +31,48 @@ const io = new Server(server, {
   },
 });
 
+io.use(socketAuthMiddleware);
+
 io.on('connection', (socket) => {
-  console.log('User connected:', socket.id);
+  console.log('User connected:', socket.user.email);
   
+  socket.on('join_room', (roomId) => {
+    socket.join(roomId);
+    console.log(`User ${socket.user.email} joined room ${roomId}`);
+  });
+
+  socket.on('send_message', async (data) => {
+    const { room_id, content } = data;
+    try {
+      const { data: message, error } = await supabaseAdmin
+        .from('messages')
+        .insert({
+          room_id,
+          user_id: socket.user.sub,
+          content
+        })
+        .select(`*, sender:users(id, username, avatar_url)`)
+        .single();
+
+      if (error) throw error;
+
+      const formattedMessage = {
+        id: message.id,
+        sender_id: message.user_id,
+        sender_username: message.sender?.username,
+        sender_avatar: message.sender?.avatar_url,
+        content: message.content,
+        created_at: message.created_at
+      };
+
+      io.to(room_id).emit('new_message', formattedMessage);
+    } catch (error) {
+      console.error('Send message error:', error);
+    }
+  });
+
   socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id);
+    console.log('User disconnected:', socket.user.email);
   });
 });
 
