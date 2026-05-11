@@ -62,6 +62,43 @@ router.post('/', async (req, res) => {
   }
 });
 
+// POST /rooms/:id/members
+router.post('/:id/members', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { user_id } = req.body;
+
+    // Check if requester is member
+    const { data: member, error: memberError } = await supabaseAdmin
+      .from('room_members')
+      .select('*')
+      .eq('room_id', id)
+      .eq('user_id', req.user.sub)
+      .single();
+
+    if (memberError || !member) {
+      return res.status(403).json({ success: false, error: 'Kamu bukan anggota ruangan ini' });
+    }
+
+    // Add user
+    const { error: inviteError } = await supabaseAdmin
+      .from('room_members')
+      .insert({ room_id: id, user_id, role: 'member' });
+
+    if (inviteError) {
+      if (inviteError.code === '23505') {
+        return res.status(400).json({ success: false, error: 'User sudah ada di ruangan ini' });
+      }
+      throw inviteError;
+    }
+
+    return res.json({ success: true, message: 'User berhasil di-invite' });
+  } catch (error) {
+    console.error('Invite member error:', error);
+    return res.status(500).json({ success: false, error: 'Gagal meng-invite user' });
+  }
+});
+
 // GET /rooms/:id/messages
 router.get('/:id/messages', async (req, res) => {
   try {

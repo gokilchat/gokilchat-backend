@@ -16,11 +16,13 @@ app.use(express.json());
 
 import authRoutes from './routes/auth.js';
 import roomRoutes from './routes/rooms.js';
+import usersRoutes from './routes/users.js';
 import { socketAuthMiddleware } from './middlewares/auth.js';
 import { supabaseAdmin } from './utils/supabase.js';
 
 app.use('/auth', authRoutes);
 app.use('/rooms', roomRoutes);
+app.use('/users', usersRoutes);
 
 
 const io = new Server(server, {
