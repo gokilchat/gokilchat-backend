@@ -114,4 +114,35 @@ router.post('/google', async (req, res) => {
   }
 });
 
+// GET /auth/me - Get current profile
+router.get('/me', authMiddleware, async (req, res) => {
+  try {
+    const { data: user, error: userError } = await supabaseAdmin
+      .from('users')
+      .select('*, settings:user_settings(group_invite_privacy)')
+      .eq('id', req.user.sub)
+      .single();
+
+    if (userError || !user) {
+      return res.status(404).json({ success: false, error: 'User tidak ditemukan' });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        ...user,
+        settings: user.settings?.[0] || { group_invite_privacy: 'anyone' }
+      }
+    });
+  } catch (error) {
+    console.error('Me error:', error);
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+// POST /auth/logout
+router.post('/logout', async (req, res) => {
+  return res.json({ success: true });
+});
+
 export default router;
