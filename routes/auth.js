@@ -2,6 +2,7 @@ import express from 'express';
 import { OAuth2Client } from 'google-auth-library';
 import { supabaseAdmin } from '../utils/supabase.js';
 import jwt from 'jsonwebtoken';
+import { authMiddleware } from '../middlewares/auth.js';
 
 const router = express.Router();
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);

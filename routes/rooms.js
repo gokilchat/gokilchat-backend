@@ -29,7 +29,7 @@ router.get('/', async (req, res) => {
     const formattedRooms = await Promise.all(rooms.map(async (room) => {
       const { data: lastMsg } = await supabaseAdmin
         .from('messages')
-        .select(`content, created_at, sender:users(username)`)
+        .select(`content, created_at, sender:users!messages_sender_id_fkey(username)`)
         .eq('room_id', room.id)
         .order('created_at', { ascending: false })
         .limit(1)
@@ -261,7 +261,7 @@ router.get('/:id/messages', async (req, res) => {
     const { id } = req.params;
     const { data: messages, error } = await supabaseAdmin
       .from('messages')
-      .select(`*, sender:users(id, username, avatar_url)`)
+      .select(`*, sender:users!messages_sender_id_fkey(id, username, avatar_url)`)
       .eq('room_id', id)
       .order('created_at', { ascending: true })
       .limit(50);
