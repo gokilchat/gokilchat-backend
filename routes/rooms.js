@@ -10,7 +10,7 @@ router.use(authMiddleware);
 router.get('/', async (req, res) => {
   try {
     const { data: participants, error: pError } = await supabaseAdmin
-      .from('room_participants')
+      .from('room_members')
       .select('room_id')
       .eq('user_id', req.user.sub);
 
@@ -50,7 +50,7 @@ router.post('/', async (req, res) => {
     if (roomError) throw roomError;
 
     const { error: partError } = await supabaseAdmin
-      .from('room_participants')
+      .from('room_members')
       .insert({ room_id: room.id, user_id: req.user.sub, role: 'owner' });
 
     if (partError) throw partError;
