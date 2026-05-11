@@ -39,19 +39,36 @@ router.get('/', async (req, res) => {
 // POST /rooms
 router.post('/', async (req, res) => {
   try {
-    const { name } = req.body;
+    const { name, type = 'group', target_user_id } = req.body;
     
+    // For DM, check if room already exists
+    if (type === 'private' && target_user_id) {
+       // logic to find existing DM could go here, but for now we just create
+    }
+
     const { data: room, error: roomError } = await supabaseAdmin
       .from('rooms')
-      .insert({ name: name || 'New Room', type: 'group', owner_id: req.user.sub })
+      .insert({ 
+        name: type === 'private' ? 'Direct Message' : (name || 'New Room'), 
+        type, 
+        owner_id: req.user.sub 
+      })
       .select('*')
       .single();
 
     if (roomError) throw roomError;
 
+    // Add owner
+    const membersToInsert = [{ room_id: room.id, user_id: req.user.sub, role: 'owner' }];
+    
+    // Add target user for DM
+    if (type === 'private' && target_user_id) {
+      membersToInsert.push({ room_id: room.id, user_id: target_user_id, role: 'member' });
+    }
+
     const { error: partError } = await supabaseAdmin
       .from('room_members')
-      .insert({ room_id: room.id, user_id: req.user.sub, role: 'owner' });
+      .insert(membersToInsert);
 
     if (partError) throw partError;
 
@@ -114,8 +131,8 @@ router.get('/:id/messages', async (req, res) => {
 
     const formattedMessages = messages.map(m => ({
       id: m.id,
-      sender_id: m.user_id,
-      sender_username: m.sender?.username,
+      sender_id: m.sender_id || m.user_id, // check both potential column names
+      sender_username: m.sender?.username || 'Gokil User',
       sender_avatar: m.sender?.avatar_url,
       content: m.content,
       created_at: m.created_at

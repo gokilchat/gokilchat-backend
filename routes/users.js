@@ -10,10 +10,10 @@ router.use(authMiddleware);
 router.get('/', async (req, res) => {
   try {
     const { query } = req.query;
-    let dbQuery = supabaseAdmin.from('users').select('id, username, avatar_url, email');
+    let dbQuery = supabaseAdmin.from('users').select('id, username, avatar_url');
     
     if (query) {
-      dbQuery = dbQuery.or(`username.ilike.%${query}%,email.ilike.%${query}%`);
+      dbQuery = dbQuery.ilike('username', `%${query}%`);
     }
 
     const { data: users, error } = await dbQuery.limit(10);
