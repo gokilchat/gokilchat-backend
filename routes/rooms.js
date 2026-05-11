@@ -36,21 +36,68 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST /rooms
+// POST /rooms - Create group
 router.post('/', async (req, res) => {
   try {
-    const { name, type = 'group', target_user_id } = req.body;
+    const { name } = req.body;
     
-    // For DM, check if room already exists
-    if (type === 'private' && target_user_id) {
-       // logic to find existing DM could go here, but for now we just create
+    if (!name) {
+      return res.status(400).json({ success: false, error: 'Nama grup wajib diisi' });
     }
+
+    const invite_token = Math.random().toString(36).substring(2, 8);
 
     const { data: room, error: roomError } = await supabaseAdmin
       .from('rooms')
       .insert({ 
-        name: type === 'dm' ? 'Direct Message' : (name || 'New Room'), 
-        type, 
+        name, 
+        type: 'group', 
+        owner_id: req.user.sub,
+        invite_token
+      })
+      .select('*')
+      .single();
+
+    if (roomError) throw roomError;
+
+    const { error: partError } = await supabaseAdmin
+      .from('room_members')
+      .insert({ room_id: room.id, user_id: req.user.sub, role: 'owner' });
+
+    if (partError) throw partError;
+
+    return res.json({ 
+      success: true, 
+      data: {
+        id: room.id,
+        name: room.name,
+        type: room.type,
+        invite_token: room.invite_token
+      }
+    });
+  } catch (error) {
+    console.error('Create room error:', error);
+    return res.status(500).json({ success: false, error: 'Gagal membuat ruangan' });
+  }
+});
+
+// POST /rooms/dm - Create or open DM
+router.post('/dm', async (req, res) => {
+  try {
+    const { target_user_id } = req.body;
+
+    if (!target_user_id) {
+      return res.status(400).json({ success: false, error: 'Target user ID wajib diisi' });
+    }
+
+    // Check if DM already exists
+    // (In production, you'd query room_members to find a shared room of type 'dm')
+    // For simplicity now, we just create a new one
+    
+    const { data: room, error: roomError } = await supabaseAdmin
+      .from('rooms')
+      .insert({ 
+        type: 'dm', 
         owner_id: req.user.sub 
       })
       .select('*')
@@ -58,24 +105,23 @@ router.post('/', async (req, res) => {
 
     if (roomError) throw roomError;
 
-    // Add owner
-    const membersToInsert = [{ room_id: room.id, user_id: req.user.sub, role: 'owner' }];
-    
-    // Add target user for DM
-    if (type === 'private' && target_user_id) {
-      membersToInsert.push({ room_id: room.id, user_id: target_user_id, role: 'member' });
-    }
-
-    const { error: partError } = await supabaseAdmin
+    await supabaseAdmin
       .from('room_members')
-      .insert(membersToInsert);
+      .insert([
+        { room_id: room.id, user_id: req.user.sub, role: 'owner' },
+        { room_id: room.id, user_id: target_user_id, role: 'member' }
+      ]);
 
-    if (partError) throw partError;
-
-    return res.json({ success: true, data: room });
+    return res.json({ 
+      success: true, 
+      data: {
+        id: room.id,
+        type: 'dm'
+      }
+    });
   } catch (error) {
-    console.error('Create room error:', error);
-    return res.status(500).json({ success: false, error: 'Gagal membuat ruangan' });
+    console.error('DM error:', error);
+    return res.status(500).json({ success: false, error: 'Gagal membuat chat pribadi' });
   }
 });
 

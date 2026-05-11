@@ -6,17 +6,20 @@ const router = express.Router();
 
 router.use(authMiddleware);
 
-// GET /users - Search users
-router.get('/', async (req, res) => {
+// GET /users/search?username=xxx - Search users
+router.get('/search', async (req, res) => {
   try {
-    const { query } = req.query;
-    let dbQuery = supabaseAdmin.from('users').select('id, username, avatar_url');
+    const { username } = req.query;
     
-    if (query) {
-      dbQuery = dbQuery.ilike('username', `%${query}%`);
+    if (!username || username.length < 2) {
+      return res.status(400).json({ success: false, error: 'Username minimal 2 karakter' });
     }
 
-    const { data: users, error } = await dbQuery.limit(10);
+    const { data: users, error } = await supabaseAdmin
+      .from('users')
+      .select('id, username, avatar_url')
+      .ilike('username', `%${username}%`)
+      .limit(10);
 
     if (error) throw error;
 
