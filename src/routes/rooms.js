@@ -59,7 +59,7 @@ router.get("/", async (req, res) => {
         const { data: lastMsg, error: lmError } = await supabaseAdmin
           .from("messages")
           .select(
-            `content, created_at, sender:users!messages_sender_id_fkey(username)`,
+            `content, created_at, sender:users!sender_id(username)`,
           )
           .eq("room_id", room.id)
           .order("created_at", { ascending: false })
@@ -113,7 +113,7 @@ router.post("/", async (req, res) => {
 
     const supabase = supabaseUser(req.token);
 
-    const { data: room, error: roomError } = await supabase
+    const { data: room, error: roomError } = await supabaseAdmin
       .from("rooms")
       .insert({
         name,
@@ -126,7 +126,7 @@ router.post("/", async (req, res) => {
 
     if (roomError) throw roomError;
 
-    const { error: partError } = await supabase
+    const { error: partError } = await supabaseAdmin
       .from("room_members")
       .insert({ room_id: room.id, user_id: req.user.sub, role: "owner" });
 
@@ -185,7 +185,8 @@ router.post("/dm", async (req, res) => {
       }
     }
 
-    const { data: room, error: roomError } = await supabase
+    // Pake supabaseAdmin buat urusan nulis data (Bypass RLS sesuai spec setup)
+    const { data: room, error: roomError } = await supabaseAdmin
       .from("rooms")
       .insert({
         type: "dm",
@@ -196,12 +197,15 @@ router.post("/dm", async (req, res) => {
 
     if (roomError) throw roomError;
 
-    const { error: memberError } = await supabase.from("room_members").insert([
+    const { error: memberError } = await supabaseAdmin.from("room_members").insert([
       { room_id: room.id, user_id: req.user.sub, role: "owner" },
       { room_id: room.id, user_id: target_user_id, role: "user" },
     ]);
 
     if (memberError) throw memberError;
+
+    // Emit event ke target user kalo dia online biar room-nya langsung muncul di sidebar dia
+    // (Bakal dihandle via socket user room nanti)
 
     return res.json({
       success: true,
@@ -335,24 +339,28 @@ router.post("/:id/clear", async (req, res) => {
 router.get("/:id/messages", async (req, res) => {
   try {
     const { id } = req.params;
+    console.log(`[DEBUG] Fetching messages for room: ${id}`);
+    
     // Bypass RLS sementara
     const { data: messages, error } = await supabaseAdmin
       .from("messages")
       .select(
-        `*, sender:users!messages_sender_id_fkey(id, username, avatar_url)`,
+        `*, sender:users!sender_id(id, username, avatar_url)`,
       )
       .eq("room_id", id)
       .order("created_at", { ascending: true })
       .limit(50);
 
     if (error) {
-      console.error("Fetch messages error DETAIL:", error);
+      console.error("[DEBUG] DB Error:", error);
       throw error;
     }
 
+    console.log(`[DEBUG] Found ${messages?.length || 0} messages`);
+
     const formattedMessages = messages.map((m) => ({
       id: m.id,
-      sender_id: m.sender_id || m.user_id, // check both potential column names
+      sender_id: m.sender_id || m.user_id,
       sender_username: m.sender?.username || "Gokil User",
       sender_avatar: m.sender?.avatar_url,
       content: m.content,

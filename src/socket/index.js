@@ -21,6 +21,10 @@ export default function initSocket(httpServer) {
 
   io.on('connection', (socket) => {
     console.log('User connected via Socket:', socket.user.email);
+    
+    // Join personal room for targeted notifications
+    socket.join(`user:${socket.user.id}`);
+    
     onlineUsers.set(socket.user.id, socket.id);
 
     registerMessageHandlers(io, socket, onlineUsers);

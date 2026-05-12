@@ -39,7 +39,7 @@ export default function registerMessageHandlers(io, socket, onlineUsers) {
       }
 
       // 2. Persist to DB
-      const { data: message, error: insertError } = await supabaseAdmin
+      const { data: insertedMsg, error: insertError } = await supabaseAdmin
         .from('messages')
         .insert({
           room_id,
@@ -49,12 +49,34 @@ export default function registerMessageHandlers(io, socket, onlineUsers) {
           reply_preview,
           content: data?.content || null
         })
-        .select('*, sender:users!messages_sender_id_fkey(username, avatar_url)')
+        .select('id')
         .single();
 
-      if (insertError) throw insertError;
+      if (insertError) {
+        console.error('Insert message error:', insertError);
+        throw insertError;
+      }
 
-      // 3. Broadcast to room
+      // 2b. Fetch full message with join for broadcast
+      const { data: message, error: fetchError } = await supabaseAdmin
+        .from('messages')
+        .select('*, sender:users!sender_id(username, avatar_url)')
+        .eq('id', insertedMsg.id)
+        .single();
+
+      if (fetchError) {
+        console.error('Fetch message after insert error:', fetchError);
+        throw fetchError;
+      }
+
+      // 3. Broadcast to all members via their personal rooms
+      const { data: members, error: membersError } = await supabaseAdmin
+        .from('room_members')
+        .select('user_id')
+        .eq('room_id', room_id);
+
+      if (membersError) console.error('Error fetching members for broadcast:', membersError);
+
       const broadcastPayload = {
         id: message.id,
         room_id: message.room_id,
@@ -68,11 +90,22 @@ export default function registerMessageHandlers(io, socket, onlineUsers) {
         created_at: message.created_at
       };
 
-      io.to(room_id).emit('message:new', broadcastPayload);
+      // Broadcast to specific room AND to personal rooms of all members
+      // We use multiple .to() and then ONE .emit() so Socket.io sends it only once per socket
+      let targets = io.to(room_id);
+      
+      if (members) {
+        members.forEach(member => {
+          targets = targets.to(`user:${member.user_id}`);
+        });
+      }
+
+      targets.emit('message:new', broadcastPayload);
+
       if (callback) callback({ success: true, message_id: message.id });
 
     } catch (error) {
-      console.error('message:send error:', error);
+      console.error('message:send error DETAIL:', error);
       if (callback) callback({ success: false, error: 'Gagal mengirim pesan' });
     }
   });
