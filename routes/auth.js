@@ -98,7 +98,7 @@ router.post('/google', async (req, res) => {
         email: user.email,
         role: 'authenticated',
         app_metadata: { provider: 'google', providers: ['google'] },
-        user_metadata: { name: user.username }
+        user_metadata: { name: user.full_name || user.username }
       },
       process.env.SUPABASE_JWT_SECRET
     );

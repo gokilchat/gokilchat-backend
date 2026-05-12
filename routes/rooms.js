@@ -33,14 +33,15 @@ router.get('/', async (req, res) => {
       if (room.type === 'dm') {
         const { data: otherMember } = await supabaseAdmin
           .from('room_members')
-          .select('users(username, avatar_url)')
+          .select('user_id, users(username, avatar_url)')
           .eq('room_id', room.id)
           .neq('user_id', req.user.sub)
           .single();
         
-        if (otherMember?.users) {
-          roomName = otherMember.users.username;
-          roomAvatar = otherMember.users.avatar_url;
+        if (otherMember) {
+          roomName = otherMember.users?.username;
+          roomAvatar = otherMember.users?.avatar_url;
+          room.dm_user_id = otherMember.user_id;
         }
       }
 
@@ -56,6 +57,7 @@ router.get('/', async (req, res) => {
         id: room.id,
         name: roomName,
         avatar_url: roomAvatar,
+        dm_user_id: room.dm_user_id,
         type: room.type,
         last_message: lastMsg ? {
           content: lastMsg.content,
