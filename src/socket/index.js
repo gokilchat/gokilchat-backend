@@ -32,9 +32,26 @@ export default function initSocket(httpServer) {
     registerRoomHandlers(io, socket, onlineUsers);
     registerInviteHandlers(io, socket, onlineUsers);
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', async () => {
       console.log('User disconnected:', socket.user.email);
-      onlineUsers.delete(socket.user.id);
+      const userId = socket.user.id;
+      
+      // Broadcast offline status to all rooms the user was in
+      const { data: members } = await supabaseAdmin
+        .from('room_members')
+        .select('room_id')
+        .eq('user_id', userId);
+        
+      if (members) {
+        members.forEach(m => {
+          io.to(m.room_id).emit('presence:status', {
+            user_id: userId,
+            online: false
+          });
+        });
+      }
+      
+      onlineUsers.delete(userId);
     });
   });
 }
