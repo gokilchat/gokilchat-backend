@@ -123,12 +123,14 @@ router.post('/dm', async (req, res) => {
 
     if (roomError) throw roomError;
 
-    await supabaseAdmin
+    const { error: memberError } = await supabaseAdmin
       .from('room_members')
       .insert([
         { room_id: room.id, user_id: req.user.sub, role: 'owner' },
-        { room_id: room.id, user_id: target_user_id, role: 'member' }
+        { room_id: room.id, user_id: target_user_id, role: 'user' }
       ]);
+
+    if (memberError) throw memberError;
 
     return res.json({ 
       success: true, 

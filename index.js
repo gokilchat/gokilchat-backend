@@ -38,6 +38,9 @@ io.use(socketAuthMiddleware);
 io.on('connection', (socket) => {
   console.log('User connected:', socket.user.email);
   
+  // Join personal room for targeted notifications
+  socket.join(`user:${socket.user.sub}`);
+
   socket.on('join_room', (roomId) => {
     socket.join(roomId);
     console.log(`User ${socket.user.email} joined room ${roomId}`);
@@ -46,6 +49,7 @@ io.on('connection', (socket) => {
   socket.on('send_message', async (data) => {
     const { room_id, content } = data;
     try {
+      // 1. Insert message to database
       const { data: message, error } = await supabaseAdmin
         .from('messages')
         .insert({
@@ -61,6 +65,7 @@ io.on('connection', (socket) => {
 
       const formattedMessage = {
         id: message.id,
+        room_id: message.room_id,
         sender_id: message.sender_id,
         sender_username: message.sender?.username,
         sender_avatar: message.sender?.avatar_url,
@@ -68,7 +73,18 @@ io.on('connection', (socket) => {
         created_at: message.created_at
       };
 
-      io.to(room_id).emit('new_message', formattedMessage);
+      // 2. Fetch all members of this room to broadcast to them
+      const { data: members } = await supabaseAdmin
+        .from('room_members')
+        .select('user_id')
+        .eq('room_id', room_id);
+
+      // 3. Broadcast to all members via their personal rooms
+      if (members) {
+        members.forEach(member => {
+          io.to(`user:${member.user_id}`).emit('new_message', formattedMessage);
+        });
+      }
     } catch (error) {
       console.error('Send message error:', error);
     }
