@@ -1,6 +1,6 @@
 import express from 'express';
 import { OAuth2Client } from 'google-auth-library';
-import { supabaseAdmin } from '../utils/supabase.js';
+import { supabaseAdmin } from '../lib/supabase.js';
 import jwt from 'jsonwebtoken';
 import { authMiddleware } from '../middlewares/auth.js';
 

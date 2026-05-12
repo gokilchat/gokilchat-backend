@@ -1,5 +1,5 @@
 import express from 'express';
-import { supabaseAdmin } from '../utils/supabase.js';
+import { supabaseUser } from '../lib/supabase.js';
 import { authMiddleware } from '../middlewares/auth.js';
 
 const router = express.Router();
@@ -15,7 +15,8 @@ router.get('/search', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Username minimal 2 karakter' });
     }
 
-    const { data: users, error } = await supabaseAdmin
+    const supabase = supabaseUser(req.token);
+    const { data: users, error } = await supabase
       .from('users')
       .select('id, username, full_name, avatar_url')
       .or(`username.ilike.%${username}%,full_name.ilike.%${username}%`)

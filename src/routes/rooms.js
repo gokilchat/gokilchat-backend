@@ -1,5 +1,5 @@
 import express from 'express';
-import { supabaseAdmin } from '../utils/supabase.js';
+import { supabaseUser, supabaseAdmin } from '../lib/supabase.js';
 import { authMiddleware } from '../middlewares/auth.js';
 
 const router = express.Router();
@@ -9,7 +9,8 @@ router.use(authMiddleware);
 // GET /rooms - Get all rooms with last message
 router.get('/', async (req, res) => {
   try {
-    const { data: participants, error: pError } = await supabaseAdmin
+    const supabase = supabaseUser(req.token);
+    const { data: participants, error: pError } = await supabase
       .from('room_members')
       .select('room_id')
       .eq('user_id', req.user.sub);
@@ -19,7 +20,7 @@ router.get('/', async (req, res) => {
 
     const roomIds = participants.map(p => p.room_id);
 
-    const { data: rooms, error: rError } = await supabaseAdmin
+    const { data: rooms, error: rError } = await supabase
       .from('rooms')
       .select('*')
       .in('id', roomIds);
@@ -31,7 +32,7 @@ router.get('/', async (req, res) => {
       let roomAvatar = null;
 
       if (room.type === 'dm') {
-        const { data: otherMember } = await supabaseAdmin
+        const { data: otherMember } = await supabase
           .from('room_members')
           .select('user_id, users(username, full_name, avatar_url)')
           .eq('room_id', room.id)
@@ -45,7 +46,7 @@ router.get('/', async (req, res) => {
         }
       }
 
-      const { data: lastMsg } = await supabaseAdmin
+      const { data: lastMsg } = await supabase
         .from('messages')
         .select(`content, created_at, sender:users!messages_sender_id_fkey(username)`)
         .eq('room_id', room.id)
@@ -85,7 +86,9 @@ router.post('/', async (req, res) => {
 
     const invite_token = Math.random().toString(36).substring(2, 8);
 
-    const { data: room, error: roomError } = await supabaseAdmin
+    const supabase = supabaseUser(req.token);
+
+    const { data: room, error: roomError } = await supabase
       .from('rooms')
       .insert({ 
         name, 
@@ -98,7 +101,7 @@ router.post('/', async (req, res) => {
 
     if (roomError) throw roomError;
 
-    const { error: partError } = await supabaseAdmin
+    const { error: partError } = await supabase
       .from('room_members')
       .insert({ room_id: room.id, user_id: req.user.sub, role: 'owner' });
 
@@ -132,7 +135,9 @@ router.post('/dm', async (req, res) => {
     // (In production, you'd query room_members to find a shared room of type 'dm')
     // For simplicity now, we just create a new one
     
-    const { data: room, error: roomError } = await supabaseAdmin
+    const supabase = supabaseUser(req.token);
+    
+    const { data: room, error: roomError } = await supabase
       .from('rooms')
       .insert({ 
         type: 'dm', 
@@ -143,7 +148,7 @@ router.post('/dm', async (req, res) => {
 
     if (roomError) throw roomError;
 
-    const { error: memberError } = await supabaseAdmin
+    const { error: memberError } = await supabase
       .from('room_members')
       .insert([
         { room_id: room.id, user_id: req.user.sub, role: 'owner' },
@@ -170,8 +175,10 @@ router.post('/:id/invites/:userId', async (req, res) => {
   try {
     const { id, userId } = req.params;
 
+    const supabase = supabaseUser(req.token);
+
     // Check if requester is admin/owner
-    const { data: requester, error: rError } = await supabaseAdmin
+    const { data: requester, error: rError } = await supabase
       .from('room_members')
       .select('role')
       .eq('room_id', id)
@@ -208,9 +215,12 @@ router.post('/:id/invites/:userId', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { data: room } = await supabaseAdmin.from('rooms').select('owner_id').eq('id', id).single();
+    const supabase = supabaseUser(req.token);
+    const { data: room } = await supabase.from('rooms').select('owner_id').eq('id', id).single();
     if (room?.owner_id !== req.user.sub) return res.status(403).json({ success: false, error: 'Hanya owner yang bisa hapus room' });
 
+    // Delete needs to bypass RLS potentially if RLS doesn't allow delete directly by owner,
+    // but assuming RLS is set up properly or we use admin here for deletion if it's complex
     await supabaseAdmin.from('rooms').delete().eq('id', id);
     return res.json({ success: true });
   } catch (error) {
@@ -221,7 +231,8 @@ router.delete('/:id', async (req, res) => {
 // POST /rooms/:id/leave
 router.post('/:id/leave', async (req, res) => {
   try {
-    await supabaseAdmin.from('room_members').delete().eq('room_id', req.params.id).eq('user_id', req.user.sub);
+    const supabase = supabaseUser(req.token);
+    await supabase.from('room_members').delete().eq('room_id', req.params.id).eq('user_id', req.user.sub);
     return res.json({ success: true });
   } catch (error) {
     return res.status(500).json({ success: false, error: 'Gagal keluar room' });
@@ -242,7 +253,8 @@ router.post('/:id/clear', async (req, res) => {
 router.get('/:id/messages', async (req, res) => {
   try {
     const { id } = req.params;
-    const { data: messages, error } = await supabaseAdmin
+    const supabase = supabaseUser(req.token);
+    const { data: messages, error } = await supabase
       .from('messages')
       .select(`*, sender:users!messages_sender_id_fkey(id, username, avatar_url)`)
       .eq('room_id', id)
