@@ -50,17 +50,18 @@ io.on('connection', (socket) => {
         .from('messages')
         .insert({
           room_id,
-          user_id: socket.user.sub,
-          content
+          sender_id: socket.user.sub,
+          content,
+          template_id: '00000000-0000-0000-0000-000000000001' // Teks template
         })
-        .select(`*, sender:users(id, username, avatar_url)`)
+        .select(`*, sender:users!messages_sender_id_fkey(id, username, avatar_url)`)
         .single();
 
       if (error) throw error;
 
       const formattedMessage = {
         id: message.id,
-        sender_id: message.user_id,
+        sender_id: message.sender_id,
         sender_username: message.sender?.username,
         sender_avatar: message.sender?.avatar_url,
         content: message.content,

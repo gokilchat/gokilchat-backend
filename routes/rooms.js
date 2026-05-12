@@ -216,45 +216,6 @@ router.post('/:id/clear', async (req, res) => {
   }
 });
 
-// POST /rooms/:id/messages
-router.post('/:id/messages', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { content } = req.body;
-
-    if (!content) {
-      return res.status(400).json({ success: false, error: 'Pesan tidak boleh kosong' });
-    }
-
-    const { data: message, error } = await supabaseAdmin
-      .from('messages')
-      .insert({
-        room_id: id,
-        sender_id: req.user.sub,
-        content,
-        template_id: '00000000-0000-0000-0000-000000000001' // Teks template
-      })
-      .select(`*, sender:users!messages_sender_id_fkey(id, username, avatar_url)`)
-      .single();
-
-    if (error) throw error;
-
-    const formattedMessage = {
-      id: message.id,
-      sender_id: message.sender_id,
-      sender_username: message.sender?.username,
-      sender_avatar: message.sender?.avatar_url,
-      content: message.content,
-      created_at: message.created_at
-    };
-
-    return res.json({ success: true, data: formattedMessage });
-  } catch (error) {
-    console.error('Post message error:', error);
-    return res.status(500).json({ success: false, error: 'Gagal mengirim pesan' });
-  }
-});
-
 // GET /rooms/:id/messages
 router.get('/:id/messages', async (req, res) => {
   try {
