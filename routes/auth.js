@@ -33,7 +33,7 @@ router.post('/google', async (req, res) => {
     // 1. Try to get existing user from public.users by email
     const { data: existingUsers, error: searchError } = await supabaseAdmin
       .from('users')
-      .select('id, username, email, avatar_url, system_role')
+      .select('id, username, full_name, email, avatar_url, system_role')
       .eq('email', email);
 
     if (searchError) {
@@ -47,10 +47,11 @@ router.post('/google', async (req, res) => {
       // Sync latest profile from Google
       await supabaseAdmin
         .from('users')
-        .update({ avatar_url: picture })
+        .update({ avatar_url: picture, full_name: name })
         .eq('id', user.id);
       
       user.avatar_url = picture; // update local object
+      user.full_name = name;
       
       // Get auth.users id
       const { data: authUsers, error: authSearchError } = await supabaseAdmin.auth.admin.listUsers();
@@ -77,7 +78,7 @@ router.post('/google', async (req, res) => {
       
       const { data: newUserQuery } = await supabaseAdmin
         .from('users')
-        .select('id, username, email, avatar_url, system_role')
+        .select('id, username, full_name, email, avatar_url, system_role')
         .eq('id', authUser.id)
         .single();
         

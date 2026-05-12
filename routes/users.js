@@ -17,8 +17,8 @@ router.get('/search', async (req, res) => {
 
     const { data: users, error } = await supabaseAdmin
       .from('users')
-      .select('id, username, avatar_url')
-      .ilike('username', `%${username}%`)
+      .select('id, username, full_name, avatar_url')
+      .or(`username.ilike.%${username}%,full_name.ilike.%${username}%`)
       .limit(10);
 
     if (error) throw error;
