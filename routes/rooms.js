@@ -33,13 +33,13 @@ router.get('/', async (req, res) => {
       if (room.type === 'dm') {
         const { data: otherMember } = await supabaseAdmin
           .from('room_members')
-          .select('user_id, users(username, avatar_url)')
+          .select('user_id, users(username, full_name, avatar_url)')
           .eq('room_id', room.id)
           .neq('user_id', req.user.sub)
           .single();
         
         if (otherMember) {
-          roomName = otherMember.users?.username;
+          roomName = otherMember.users?.full_name || otherMember.users?.username;
           roomAvatar = otherMember.users?.avatar_url;
           room.dm_user_id = otherMember.user_id;
         }
