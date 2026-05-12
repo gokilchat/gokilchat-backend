@@ -27,6 +27,23 @@ router.get('/', async (req, res) => {
     if (rError) throw rError;
 
     const formattedRooms = await Promise.all(rooms.map(async (room) => {
+      let roomName = room.name;
+      let roomAvatar = null;
+
+      if (room.type === 'dm') {
+        const { data: otherMember } = await supabaseAdmin
+          .from('room_members')
+          .select('users(username, avatar_url)')
+          .eq('room_id', room.id)
+          .neq('user_id', req.user.sub)
+          .single();
+        
+        if (otherMember?.users) {
+          roomName = otherMember.users.username;
+          roomAvatar = otherMember.users.avatar_url;
+        }
+      }
+
       const { data: lastMsg } = await supabaseAdmin
         .from('messages')
         .select(`content, created_at, sender:users!messages_sender_id_fkey(username)`)
@@ -37,7 +54,8 @@ router.get('/', async (req, res) => {
 
       return {
         id: room.id,
-        name: room.name,
+        name: roomName,
+        avatar_url: roomAvatar,
         type: room.type,
         last_message: lastMsg ? {
           content: lastMsg.content,
