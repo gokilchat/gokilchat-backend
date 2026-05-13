@@ -60,7 +60,7 @@ export default function registerMessageHandlers(io, socket, onlineUsers) {
       // 2b. Fetch full message with join for broadcast
       const { data: message, error: fetchError } = await supabaseAdmin
         .from('messages')
-        .select('*, sender:users!sender_id(username, avatar_url)')
+        .select('*, sender:users!sender_id(username, full_name, avatar_url)')
         .eq('id', insertedMsg.id)
         .single();
 
@@ -82,6 +82,7 @@ export default function registerMessageHandlers(io, socket, onlineUsers) {
         room_id: message.room_id,
         sender_id: message.sender_id,
         sender_username: message.sender?.username,
+        sender_full_name: message.sender?.full_name,
         sender_avatar: message.sender?.avatar_url,
         template_id: message.template_id,
         parent_id: message.parent_id,

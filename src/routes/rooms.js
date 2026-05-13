@@ -350,7 +350,7 @@ router.get("/:id/messages", async (req, res) => {
     const { data: messages, error } = await supabaseAdmin
       .from("messages")
       .select(
-        `*, sender:users!sender_id(id, username, avatar_url)`,
+        `*, sender:users!sender_id(id, username, full_name, avatar_url)`,
       )
       .eq("room_id", id)
       .order("created_at", { ascending: true })
@@ -367,6 +367,7 @@ router.get("/:id/messages", async (req, res) => {
       id: m.id,
       sender_id: m.sender_id || m.user_id,
       sender_username: m.sender?.username || "Gokil User",
+      sender_full_name: m.sender?.full_name,
       sender_avatar: m.sender?.avatar_url,
       content: m.content,
       created_at: m.created_at,
