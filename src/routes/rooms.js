@@ -162,19 +162,24 @@ router.post("/dm", async (req, res) => {
 
     const supabase = supabaseUser(req.token);
 
-    // Pake supabaseAdmin buat cek ini biar gak kena RLS infinite loop
-    const { data: myDMs } = await supabaseAdmin
-      .from("rooms")
-      .select("id")
-      .eq("type", "dm");
+    // Cari room DM yang isinya CUMA berdua: Pengirim & Target
+    // Logika: Cari room type 'dm' dimana pengirim adalah member, 
+    // lalu cek apakah di room yang sama ada si target.
+    const { data: existingRoom, error: lookupError } = await supabaseAdmin
+      .from("room_members")
+      .select("room_id, rooms!inner(type)")
+      .eq("user_id", req.user.sub)
+      .eq("rooms.type", "dm");
 
-    if (myDMs && myDMs.length > 0) {
-      const roomIds = myDMs.map((r) => r.id);
+    if (existingRoom && existingRoom.length > 0) {
+      const myDmRoomIds = existingRoom.map(r => r.room_id);
+      
+      // Cek dari daftar room DM gue, mana yang ada si target_user_id
       const { data: sharedRoom } = await supabaseAdmin
         .from("room_members")
         .select("room_id")
+        .in("room_id", myDmRoomIds)
         .eq("user_id", target_user_id)
-        .in("room_id", roomIds)
         .maybeSingle();
 
       if (sharedRoom) {
