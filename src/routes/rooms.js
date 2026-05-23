@@ -16,7 +16,7 @@ async function getOrCreateDmRoom(userId1, userId2) {
     .eq("rooms.type", "dm");
 
   if (existingRooms && existingRooms.length > 0) {
-    const roomIds = existingRooms.map(r => r.room_id);
+    const roomIds = existingRooms.map((r) => r.room_id);
     const { data: sharedRoom } = await supabaseAdmin
       .from("room_members")
       .select("room_id")
@@ -36,10 +36,12 @@ async function getOrCreateDmRoom(userId1, userId2) {
 
   if (roomError) throw roomError;
 
-  const { error: memberError } = await supabaseAdmin.from("room_members").insert([
-    { room_id: room.id, user_id: userId1, role: "owner" },
-    { room_id: room.id, user_id: userId2, role: "user" }
-  ]);
+  const { error: memberError } = await supabaseAdmin
+    .from("room_members")
+    .insert([
+      { room_id: room.id, user_id: userId1, role: "owner" },
+      { room_id: room.id, user_id: userId2, role: "user" },
+    ]);
 
   if (memberError) throw memberError;
 
@@ -49,7 +51,7 @@ async function getOrCreateDmRoom(userId1, userId2) {
 // GET /rooms - Get all rooms with last message
 router.get("/", async (req, res) => {
   try {
-    // Pake supabaseAdmin buat bypass RLS sementara, karena policy "room_members_select" 
+    // Pake supabaseAdmin buat bypass RLS sementara, karena policy "room_members_select"
     // di DB lo ternyata recursive (infinite loop) kalau pake supabaseUser.
     const { data: participants, error: pError } = await supabaseAdmin
       .from("room_members")
@@ -98,9 +100,7 @@ router.get("/", async (req, res) => {
 
         const { data: lastMsg, error: lmError } = await supabaseAdmin
           .from("messages")
-          .select(
-            `content, created_at, sender:users!sender_id(username)`,
-          )
+          .select(`content, created_at, sender:users!sender_id(username)`)
           .eq("room_id", room.id)
           .order("created_at", { ascending: false })
           .limit(1)
@@ -193,7 +193,7 @@ router.post("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     // Validate if user is a member
     const { data: member, error: mError } = await supabaseAdmin
       .from("room_members")
@@ -201,14 +201,18 @@ router.get("/:id", async (req, res) => {
       .eq("room_id", id)
       .eq("user_id", req.user.sub)
       .single();
-      
+
     if (mError || !member) {
-      return res.status(403).json({ success: false, error: "Tidak memiliki akses ke ruangan ini" });
+      return res
+        .status(403)
+        .json({ success: false, error: "Tidak memiliki akses ke ruangan ini" });
     }
 
     const { data: room, error: rError } = await supabaseAdmin
       .from("rooms")
-      .select("*, members:room_members(role, joined_at, user:users(id, username, full_name, avatar_url))")
+      .select(
+        "*, members:room_members(role, joined_at, user:users(id, username, full_name, avatar_url))",
+      )
       .eq("id", id)
       .single();
 
@@ -217,7 +221,9 @@ router.get("/:id", async (req, res) => {
     return res.json({ success: true, data: room });
   } catch (error) {
     console.error("Fetch room error:", error);
-    return res.status(500).json({ success: false, error: "Gagal mengambil detail ruangan" });
+    return res
+      .status(500)
+      .json({ success: false, error: "Gagal mengambil detail ruangan" });
   }
 });
 
@@ -226,14 +232,18 @@ router.post("/dm", async (req, res) => {
   try {
     const { target_user_id } = req.body;
     if (!target_user_id) {
-      return res.status(400).json({ success: false, error: "Target user ID wajib diisi" });
+      return res
+        .status(400)
+        .json({ success: false, error: "Target user ID wajib diisi" });
     }
 
     const roomId = await getOrCreateDmRoom(req.user.sub, target_user_id);
     return res.json({ success: true, data: { id: roomId, type: "dm" } });
   } catch (error) {
     console.error("DM error:", error);
-    return res.status(500).json({ success: false, error: "Gagal membuat chat pribadi" });
+    return res
+      .status(500)
+      .json({ success: false, error: "Gagal membuat chat pribadi" });
   }
 });
 
@@ -277,9 +287,9 @@ router.post("/:id/invites/:userId", async (req, res) => {
       const { error: insertError } = await supabaseAdmin
         .from("room_members")
         .insert({ room_id: id, user_id: userId, role: "user" });
-      
+
       if (insertError) throw insertError;
-        
+
       return res.json({
         success: true,
         data: { status: "joined", room_id: id, user_id: userId },
@@ -290,41 +300,41 @@ router.post("/:id/invites/:userId", async (req, res) => {
 
       // 2. Bikin Pesan tipe room_invite di DM tersebut
       const { data: msg, error: msgError } = await supabaseAdmin
-        .from('messages')
+        .from("messages")
         .insert({
           room_id: dmRoomId,
           sender_id: req.user.sub,
-          template_id: '00000000-0000-0000-0000-000000000002', // ID Template Undangan Grup
-          content: null
+          template_id: "00000000-0000-0000-0000-000000000002", // ID Template Undangan Grup
+          content: null,
         })
-        .select('id')
+        .select("id")
         .single();
 
       if (msgError) throw msgError;
 
       // 3. Masukin data ke room_invite_data
       const { error: inviteError } = await supabaseAdmin
-        .from('room_invite_data')
+        .from("room_invite_data")
         .insert({
           message_id: msg.id,
           invitee_id: userId,
           target_room_id: id, // HARUS DITAMBAHKAN OLEH USER DI SUPABASE
-          status: 'pending'
+          status: "pending",
         });
 
       if (inviteError) throw inviteError;
-      
+
       // Fetch data lengkap untuk socket emit
       const { data: targetRoom } = await supabaseAdmin
-        .from('rooms')
-        .select('name')
-        .eq('id', id)
+        .from("rooms")
+        .select("name")
+        .eq("id", id)
         .single();
-        
+
       const { data: senderInfo } = await supabaseAdmin
-        .from('users')
-        .select('username, full_name, avatar_url')
-        .eq('id', req.user.sub)
+        .from("users")
+        .select("username, full_name, avatar_url")
+        .eq("id", req.user.sub)
         .single();
 
       const formattedMessage = {
@@ -342,18 +352,18 @@ router.post("/:id/invites/:userId", async (req, res) => {
           status: "pending",
           target_room_id: id,
           target_room_name: targetRoom?.name || "Grup",
-          target_room_avatar: targetRoom?.avatar_url
-        }
+          target_room_avatar: targetRoom?.avatar_url,
+        },
       };
 
-      const io = req.app.get('io');
+      const io = req.app.get("io");
       if (io) {
         // Emit ke room DM (target format yang ada di socket_events-v2.md)
-        io.to(`room:${dmRoomId}`).emit('message:new', formattedMessage);
-        
-        // PENTING: Karena user mungkin belum ada di DM room, 
+        io.to(`room:${dmRoomId}`).emit("message:new", formattedMessage);
+
+        // PENTING: Karena user mungkin belum ada di DM room,
         // kita juga push notif personal ke invitee_id (supaya sidebar nya ke-update)
-        io.to(`user:${userId}`).emit('message:new', formattedMessage);
+        io.to(`user:${userId}`).emit("message:new", formattedMessage);
       }
 
       return res.json({
@@ -376,38 +386,53 @@ router.patch("/:id/invites/:inviteId/accept", async (req, res) => {
 
     // Verifikasi undangannya
     const { data: invite, error: inviteError } = await supabaseAdmin
-      .from('room_invite_data')
-      .select('invitee_id, status, target_room_id')
-      .eq('message_id', inviteId)
+      .from("room_invite_data")
+      .select("invitee_id, status, target_room_id")
+      .eq("message_id", inviteId)
       .single();
 
     if (inviteError || !invite) {
-      return res.status(404).json({ success: false, error: "Undangan tidak ditemukan" });
+      return res
+        .status(404)
+        .json({ success: false, error: "Undangan tidak ditemukan" });
     }
 
     if (invite.invitee_id !== req.user.sub) {
-      return res.status(403).json({ success: false, error: "Hanya yang diundang yang bisa menerima" });
+      return res
+        .status(403)
+        .json({
+          success: false,
+          error: "Hanya yang diundang yang bisa menerima",
+        });
     }
 
-    if (invite.status !== 'pending') {
-      return res.status(400).json({ success: false, error: "Undangan sudah tidak berlaku" });
+    if (invite.status !== "pending") {
+      return res
+        .status(400)
+        .json({ success: false, error: "Undangan sudah tidak berlaku" });
     }
 
     // Update status
     await supabaseAdmin
-      .from('room_invite_data')
-      .update({ status: 'accepted' })
-      .eq('message_id', inviteId);
+      .from("room_invite_data")
+      .update({ status: "accepted" })
+      .eq("message_id", inviteId);
 
     // Join room
     await supabaseAdmin
-      .from('room_members')
-      .insert({ room_id: invite.target_room_id, user_id: req.user.sub, role: 'user' });
+      .from("room_members")
+      .insert({
+        room_id: invite.target_room_id,
+        user_id: req.user.sub,
+        role: "user",
+      });
 
-    return res.json({ success: true, data: { status: 'accepted' } });
+    return res.json({ success: true, data: { status: "accepted" } });
   } catch (error) {
     console.error("Accept invite error:", error);
-    return res.status(500).json({ success: false, error: "Gagal menerima undangan" });
+    return res
+      .status(500)
+      .json({ success: false, error: "Gagal menerima undangan" });
   }
 });
 
@@ -417,23 +442,31 @@ router.patch("/:id/invites/:inviteId/reject", async (req, res) => {
     const { inviteId } = req.params;
 
     const { data: invite } = await supabaseAdmin
-      .from('room_invite_data')
-      .select('invitee_id, status')
-      .eq('message_id', inviteId)
+      .from("room_invite_data")
+      .select("invitee_id, status")
+      .eq("message_id", inviteId)
       .single();
 
-    if (!invite || invite.invitee_id !== req.user.sub || invite.status !== 'pending') {
-      return res.status(400).json({ success: false, error: "Undangan tidak valid" });
+    if (
+      !invite ||
+      invite.invitee_id !== req.user.sub ||
+      invite.status !== "pending"
+    ) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Undangan tidak valid" });
     }
 
     await supabaseAdmin
-      .from('room_invite_data')
-      .update({ status: 'rejected' })
-      .eq('message_id', inviteId);
+      .from("room_invite_data")
+      .update({ status: "rejected" })
+      .eq("message_id", inviteId);
 
-    return res.json({ success: true, data: { status: 'rejected' } });
+    return res.json({ success: true, data: { status: "rejected" } });
   } catch (error) {
-    return res.status(500).json({ success: false, error: "Gagal menolak undangan" });
+    return res
+      .status(500)
+      .json({ success: false, error: "Gagal menolak undangan" });
   }
 });
 
@@ -464,27 +497,49 @@ router.delete("/:id", async (req, res) => {
 // POST /rooms/:id/leave
 router.post("/:id/leave", async (req, res) => {
   try {
+    // Cek dulu role user yang mau keluar
+    const { data: memberBefore } = await supabaseAdmin
+      .from("room_members")
+      .select("role")
+      .eq("room_id", req.params.id)
+      .eq("user_id", req.user.sub)
+      .single();
+
+    const isOwner = memberBefore?.role === "owner";
+
     const { error } = await supabaseAdmin
       .from("room_members")
       .delete()
       .eq("room_id", req.params.id)
       .eq("user_id", req.user.sub);
-      
+
     if (error) throw error;
 
-    // Cek sisa member, kalo 0 hapus room-nya sekalian biar nggak jadi grup gaib 🗿
-    const { count, error: countError } = await supabaseAdmin
+    // Cek sisa member untuk hapus room atau transfer ownership
+    const { data: remainingMembers, error: rmError } = await supabaseAdmin
       .from("room_members")
-      .select("*", { count: "exact", head: true })
-      .eq("room_id", req.params.id);
+      .select("user_id, joined_at")
+      .eq("room_id", req.params.id)
+      .order("joined_at", { ascending: true });
 
-    if (!countError && count === 0) {
+    if (!rmError && remainingMembers && remainingMembers.length === 0) {
+      await supabaseAdmin.from("rooms").delete().eq("id", req.params.id);
+    } else if (!rmError && isOwner && remainingMembers && remainingMembers.length > 0) {
+      // Owner keluar, angkat member terlama (paling atas di order joined_at) jadi owner baru 🗿
+      const nextOwnerId = remainingMembers[0].user_id;
+      
+      await supabaseAdmin
+        .from("room_members")
+        .update({ role: "owner" })
+        .eq("room_id", req.params.id)
+        .eq("user_id", nextOwnerId);
+        
       await supabaseAdmin
         .from("rooms")
-        .delete()
+        .update({ owner_id: nextOwnerId })
         .eq("id", req.params.id);
     }
-    
+
     return res.json({ success: true });
   } catch (error) {
     return res.status(500).json({ success: false, error: "Gagal keluar room" });
@@ -512,7 +567,7 @@ router.get("/:id/messages", async (req, res) => {
   try {
     const { id } = req.params;
     console.log(`[DEBUG] Fetching messages for room: ${id}`);
-    
+
     // Bypass RLS sementara
     const { data: messages, error } = await supabaseAdmin
       .from("messages")
@@ -533,39 +588,43 @@ router.get("/:id/messages", async (req, res) => {
     // Tambah info target_room di map, karena room_invite_data punya target_room_id
     // Untuk nampilin info grup di chat DM, idealnya kita select nama & avatar grup juga,
     // tapi buat MVP cukup kirim datanya aja
-    const formattedMessages = await Promise.all(messages.map(async (m) => {
-      let inviteInfo = null;
-      const inviteData = Array.isArray(m.room_invite_data) ? m.room_invite_data[0] : m.room_invite_data;
-      
-      if (m.templates?.type === "room_invite" && inviteData) {
-        // Fetch group info for the invite card
-        const { data: targetRoom } = await supabaseAdmin
-          .from("rooms")
-          .select("name")
-          .eq("id", inviteData.target_room_id)
-          .single();
-          
-        inviteInfo = {
-          invitee_id: inviteData.invitee_id,
-          status: inviteData.status,
-          target_room_id: inviteData.target_room_id,
-          target_room_name: targetRoom?.name || "Grup",
-          target_room_avatar: targetRoom?.avatar_url
-        };
-      }
+    const formattedMessages = await Promise.all(
+      messages.map(async (m) => {
+        let inviteInfo = null;
+        const inviteData = Array.isArray(m.room_invite_data)
+          ? m.room_invite_data[0]
+          : m.room_invite_data;
 
-      return {
-        id: m.id,
-        sender_id: m.sender_id || m.user_id,
-        sender_username: m.sender?.username || "Gokil User",
-        sender_full_name: m.sender?.full_name,
-        sender_avatar: m.sender?.avatar_url,
-        content: m.content,
-        created_at: m.created_at,
-        template_type: m.templates?.type || "text",
-        invite_info: inviteInfo
-      };
-    }));
+        if (m.templates?.type === "room_invite" && inviteData) {
+          // Fetch group info for the invite card
+          const { data: targetRoom } = await supabaseAdmin
+            .from("rooms")
+            .select("name")
+            .eq("id", inviteData.target_room_id)
+            .single();
+
+          inviteInfo = {
+            invitee_id: inviteData.invitee_id,
+            status: inviteData.status,
+            target_room_id: inviteData.target_room_id,
+            target_room_name: targetRoom?.name || "Grup",
+            target_room_avatar: targetRoom?.avatar_url,
+          };
+        }
+
+        return {
+          id: m.id,
+          sender_id: m.sender_id || m.user_id,
+          sender_username: m.sender?.username || "Gokil User",
+          sender_full_name: m.sender?.full_name,
+          sender_avatar: m.sender?.avatar_url,
+          content: m.content,
+          created_at: m.created_at,
+          template_type: m.templates?.type || "text",
+          invite_info: inviteInfo,
+        };
+      }),
+    );
 
     return res.json({ success: true, data: formattedMessages });
   } catch (error) {
@@ -577,110 +636,142 @@ router.get("/:id/messages", async (req, res) => {
 });
 
 // POST /rooms/join
-router.post('/join', async (req, res) => {
+router.post("/join", async (req, res) => {
   try {
     const { invite_token } = req.body;
     if (!invite_token) {
-      return res.status(400).json({ success: false, error: "Token undangan tidak valid" });
+      return res
+        .status(400)
+        .json({ success: false, error: "Token undangan tidak valid" });
     }
 
     const { data: room, error: roomError } = await supabaseAdmin
-      .from('rooms')
-      .select('id, type')
-      .eq('invite_token', invite_token)
-      .eq('type', 'group')
+      .from("rooms")
+      .select("id, type")
+      .eq("invite_token", invite_token)
+      .eq("type", "group")
       .single();
 
     if (roomError || !room) {
-      return res.status(404).json({ success: false, error: "Grup tidak ditemukan atau token tidak valid" });
+      return res
+        .status(404)
+        .json({
+          success: false,
+          error: "Grup tidak ditemukan atau token tidak valid",
+        });
     }
 
     // Check if already a member
     const { data: existingMember } = await supabaseAdmin
-      .from('room_members')
-      .select('user_id')
-      .eq('room_id', room.id)
-      .eq('user_id', req.user.sub)
+      .from("room_members")
+      .select("user_id")
+      .eq("room_id", room.id)
+      .eq("user_id", req.user.sub)
       .maybeSingle();
 
     if (existingMember) {
-      return res.json({ success: true, data: { room_id: room.id, role: "user" } });
+      return res.json({
+        success: true,
+        data: { room_id: room.id, role: "user" },
+      });
     }
 
     // Insert to room_members
     const { error: insertError } = await supabaseAdmin
-      .from('room_members')
+      .from("room_members")
       .insert({
         room_id: room.id,
         user_id: req.user.sub,
-        role: 'user'
+        role: "user",
       });
 
     if (insertError) throw insertError;
 
-    return res.json({ success: true, data: { room_id: room.id, role: 'user' } });
+    return res.json({
+      success: true,
+      data: { room_id: room.id, role: "user" },
+    });
   } catch (error) {
     console.error("Join room error:", error);
-    return res.status(500).json({ success: false, error: "Gagal bergabung dengan grup" });
+    return res
+      .status(500)
+      .json({ success: false, error: "Gagal bergabung dengan grup" });
   }
 });
 
 // GET /rooms/invite/:token - Preview room before joining
-router.get('/invite/:token', async (req, res) => {
+router.get("/invite/:token", async (req, res) => {
   try {
     const { token } = req.params;
     const { data: room, error } = await supabaseAdmin
-      .from('rooms')
-      .select('id, name, type')
-      .eq('invite_token', token)
-      .eq('type', 'group')
+      .from("rooms")
+      .select("id, name, type")
+      .eq("invite_token", token)
+      .eq("type", "group")
       .single();
 
     if (error || !room) {
-      return res.status(404).json({ success: false, error: "Link undangan tidak valid atau kedaluwarsa" });
+      return res
+        .status(404)
+        .json({
+          success: false,
+          error: "Link undangan tidak valid atau kedaluwarsa",
+        });
     }
-    
+
     // Get member count
     const { count } = await supabaseAdmin
-      .from('room_members')
-      .select('id', { count: 'exact', head: true })
-      .eq('room_id', room.id);
+      .from("room_members")
+      .select("id", { count: "exact", head: true })
+      .eq("room_id", room.id);
 
     return res.json({ success: true, data: { ...room, member_count: count } });
   } catch (error) {
-    return res.status(500).json({ success: false, error: "Gagal mengambil data undangan" });
+    return res
+      .status(500)
+      .json({ success: false, error: "Gagal mengambil data undangan" });
   }
 });
 
 // POST /rooms/:id/invite-token/regenerate
-router.post('/:id/invite-token/regenerate', async (req, res) => {
+router.post("/:id/invite-token/regenerate", async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     // Cek auth owner
     const { data: member } = await supabaseAdmin
-      .from('room_members')
-      .select('role')
-      .eq('room_id', id)
-      .eq('user_id', req.user.sub)
+      .from("room_members")
+      .select("role")
+      .eq("room_id", id)
+      .eq("user_id", req.user.sub)
       .single();
-      
-    if (!member || member.role !== 'owner') {
-      return res.status(403).json({ success: false, error: "Hanya owner yang bisa mengubah link undangan" });
+
+    if (!member || member.role !== "owner") {
+      return res
+        .status(403)
+        .json({
+          success: false,
+          error: "Hanya owner yang bisa mengubah link undangan",
+        });
     }
-    
+
     const new_invite_token = Math.random().toString(36).substring(2, 8);
-    
+
     const { error } = await supabaseAdmin
-      .from('rooms')
+      .from("rooms")
       .update({ invite_token: new_invite_token })
-      .eq('id', id);
-      
+      .eq("id", id);
+
     if (error) throw error;
-    
-    return res.json({ success: true, data: { invite_token: new_invite_token } });
+
+    return res.json({
+      success: true,
+      data: { invite_token: new_invite_token },
+    });
   } catch (error) {
-    return res.status(500).json({ success: false, error: "Gagal memperbarui link undangan" });
+    return res
+      .status(500)
+      .json({ success: false, error: "Gagal memperbarui link undangan" });
   }
 });
 
