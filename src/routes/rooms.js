@@ -471,6 +471,19 @@ router.post("/:id/leave", async (req, res) => {
       .eq("user_id", req.user.sub);
       
     if (error) throw error;
+
+    // Cek sisa member, kalo 0 hapus room-nya sekalian biar nggak jadi grup gaib 🗿
+    const { count, error: countError } = await supabaseAdmin
+      .from("room_members")
+      .select("*", { count: "exact", head: true })
+      .eq("room_id", req.params.id);
+
+    if (!countError && count === 0) {
+      await supabaseAdmin
+        .from("rooms")
+        .delete()
+        .eq("id", req.params.id);
+    }
     
     return res.json({ success: true });
   } catch (error) {
