@@ -464,12 +464,14 @@ router.delete("/:id", async (req, res) => {
 // POST /rooms/:id/leave
 router.post("/:id/leave", async (req, res) => {
   try {
-    const supabase = supabaseUser(req.token);
-    await supabase
+    const { error } = await supabaseAdmin
       .from("room_members")
       .delete()
       .eq("room_id", req.params.id)
       .eq("user_id", req.user.sub);
+      
+    if (error) throw error;
+    
     return res.json({ success: true });
   } catch (error) {
     return res.status(500).json({ success: false, error: "Gagal keluar room" });
