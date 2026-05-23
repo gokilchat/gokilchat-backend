@@ -133,7 +133,7 @@ router.get('/me', authMiddleware, async (req, res) => {
       success: true,
       data: {
         ...user,
-        settings: user.settings?.[0] || { group_invite_privacy: 'anyone' }
+        settings: user.settings || { group_invite_privacy: 'anyone' }
       }
     });
   } catch (error) {

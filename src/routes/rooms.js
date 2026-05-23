@@ -6,6 +6,46 @@ const router = express.Router();
 
 router.use(authMiddleware);
 
+// Helper function to find or create DM room
+async function getOrCreateDmRoom(userId1, userId2) {
+  // 1. Check existing
+  const { data: existingRooms } = await supabaseAdmin
+    .from("room_members")
+    .select("room_id, rooms!inner(type)")
+    .eq("user_id", userId1)
+    .eq("rooms.type", "dm");
+
+  if (existingRooms && existingRooms.length > 0) {
+    const roomIds = existingRooms.map(r => r.room_id);
+    const { data: sharedRoom } = await supabaseAdmin
+      .from("room_members")
+      .select("room_id")
+      .in("room_id", roomIds)
+      .eq("user_id", userId2)
+      .maybeSingle();
+
+    if (sharedRoom) return sharedRoom.room_id;
+  }
+
+  // 2. Create new DM
+  const { data: room, error: roomError } = await supabaseAdmin
+    .from("rooms")
+    .insert({ type: "dm", owner_id: userId1 })
+    .select("id")
+    .single();
+
+  if (roomError) throw roomError;
+
+  const { error: memberError } = await supabaseAdmin.from("room_members").insert([
+    { room_id: room.id, user_id: userId1, role: "owner" },
+    { room_id: room.id, user_id: userId2, role: "user" }
+  ]);
+
+  if (memberError) throw memberError;
+
+  return room.id;
+}
+
 // GET /rooms - Get all rooms with last message
 router.get("/", async (req, res) => {
   try {
@@ -149,81 +189,51 @@ router.post("/", async (req, res) => {
   }
 });
 
+// GET /rooms/:id - Get room details
+router.get("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Validate if user is a member
+    const { data: member, error: mError } = await supabaseAdmin
+      .from("room_members")
+      .select("role")
+      .eq("room_id", id)
+      .eq("user_id", req.user.sub)
+      .single();
+      
+    if (mError || !member) {
+      return res.status(403).json({ success: false, error: "Tidak memiliki akses ke ruangan ini" });
+    }
+
+    const { data: room, error: rError } = await supabaseAdmin
+      .from("rooms")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (rError || !room) throw rError || new Error("Room not found");
+
+    return res.json({ success: true, data: room });
+  } catch (error) {
+    console.error("Fetch room error:", error);
+    return res.status(500).json({ success: false, error: "Gagal mengambil detail ruangan" });
+  }
+});
+
 // POST /rooms/dm - Create or open DM
 router.post("/dm", async (req, res) => {
   try {
     const { target_user_id } = req.body;
-
     if (!target_user_id) {
-      return res
-        .status(400)
-        .json({ success: false, error: "Target user ID wajib diisi" });
+      return res.status(400).json({ success: false, error: "Target user ID wajib diisi" });
     }
 
-    const supabase = supabaseUser(req.token);
-
-    // Cari room DM yang isinya CUMA berdua: Pengirim & Target
-    // Logika: Cari room type 'dm' dimana pengirim adalah member, 
-    // lalu cek apakah di room yang sama ada si target.
-    const { data: existingRoom, error: lookupError } = await supabaseAdmin
-      .from("room_members")
-      .select("room_id, rooms!inner(type)")
-      .eq("user_id", req.user.sub)
-      .eq("rooms.type", "dm");
-
-    if (existingRoom && existingRoom.length > 0) {
-      const myDmRoomIds = existingRoom.map(r => r.room_id);
-      
-      // Cek dari daftar room DM gue, mana yang ada si target_user_id
-      const { data: sharedRoom } = await supabaseAdmin
-        .from("room_members")
-        .select("room_id")
-        .in("room_id", myDmRoomIds)
-        .eq("user_id", target_user_id)
-        .maybeSingle();
-
-      if (sharedRoom) {
-        return res.json({
-          success: true,
-          data: { id: sharedRoom.room_id, type: "dm" },
-        });
-      }
-    }
-
-    // Pake supabaseAdmin buat urusan nulis data (Bypass RLS sesuai spec setup)
-    const { data: room, error: roomError } = await supabaseAdmin
-      .from("rooms")
-      .insert({
-        type: "dm",
-        owner_id: req.user.sub,
-      })
-      .select("*")
-      .single();
-
-    if (roomError) throw roomError;
-
-    const { error: memberError } = await supabaseAdmin.from("room_members").insert([
-      { room_id: room.id, user_id: req.user.sub, role: "owner" },
-      { room_id: room.id, user_id: target_user_id, role: "user" },
-    ]);
-
-    if (memberError) throw memberError;
-
-    // Emit event ke target user kalo dia online biar room-nya langsung muncul di sidebar dia
-    // (Bakal dihandle via socket user room nanti)
-
-    return res.json({
-      success: true,
-      data: {
-        id: room.id,
-        type: "dm",
-      },
-    });
+    const roomId = await getOrCreateDmRoom(req.user.sub, target_user_id);
+    return res.json({ success: true, data: { id: roomId, type: "dm" } });
   } catch (error) {
     console.error("DM error:", error);
-    return res
-      .status(500)
-      .json({ success: false, error: "Gagal membuat chat pribadi" });
+    return res.status(500).json({ success: false, error: "Gagal membuat chat pribadi" });
   }
 });
 
@@ -263,18 +273,50 @@ router.post("/:id/invites/:userId", async (req, res) => {
     const privacy = settings?.group_invite_privacy || "anyone";
 
     if (privacy === "anyone") {
-      await supabaseAdmin
+      // Langsung join
+      const { error: insertError } = await supabaseAdmin
         .from("room_members")
         .insert({ room_id: id, user_id: userId, role: "user" });
+      
+      if (insertError) throw insertError;
+        
       return res.json({
         success: true,
         data: { status: "joined", room_id: id, user_id: userId },
       });
     } else {
-      // In production, create invitation record in public.room_invites
+      // 1. Get/Create DM Room
+      const dmRoomId = await getOrCreateDmRoom(req.user.sub, userId);
+
+      // 2. Bikin Pesan tipe room_invite di DM tersebut
+      const { data: msg, error: msgError } = await supabaseAdmin
+        .from('messages')
+        .insert({
+          room_id: dmRoomId,
+          sender_id: req.user.sub,
+          template_id: '00000000-0000-0000-0000-000000000002', // ID Template Undangan Grup
+          content: null
+        })
+        .select('id')
+        .single();
+
+      if (msgError) throw msgError;
+
+      // 3. Masukin data ke room_invite_data
+      const { error: inviteError } = await supabaseAdmin
+        .from('room_invite_data')
+        .insert({
+          message_id: msg.id,
+          invitee_id: userId,
+          target_room_id: id, // HARUS DITAMBAHKAN OLEH USER DI SUPABASE
+          status: 'pending'
+        });
+
+      if (inviteError) throw inviteError;
+
       return res.json({
         success: true,
-        data: { status: "pending", invite_id: "pending-invite-uuid" },
+        data: { status: "pending", invite_id: msg.id },
       });
     }
   } catch (error) {
@@ -282,6 +324,74 @@ router.post("/:id/invites/:userId", async (req, res) => {
     return res
       .status(500)
       .json({ success: false, error: "Gagal meng-invite user" });
+  }
+});
+
+// PATCH /rooms/:id/invites/:inviteId/accept
+router.patch("/:id/invites/:inviteId/accept", async (req, res) => {
+  try {
+    const { id, inviteId } = req.params;
+
+    // Verifikasi undangannya
+    const { data: invite, error: inviteError } = await supabaseAdmin
+      .from('room_invite_data')
+      .select('invitee_id, status, target_room_id')
+      .eq('message_id', inviteId)
+      .single();
+
+    if (inviteError || !invite) {
+      return res.status(404).json({ success: false, error: "Undangan tidak ditemukan" });
+    }
+
+    if (invite.invitee_id !== req.user.sub) {
+      return res.status(403).json({ success: false, error: "Hanya yang diundang yang bisa menerima" });
+    }
+
+    if (invite.status !== 'pending') {
+      return res.status(400).json({ success: false, error: "Undangan sudah tidak berlaku" });
+    }
+
+    // Update status
+    await supabaseAdmin
+      .from('room_invite_data')
+      .update({ status: 'accepted' })
+      .eq('message_id', inviteId);
+
+    // Join room
+    await supabaseAdmin
+      .from('room_members')
+      .insert({ room_id: invite.target_room_id, user_id: req.user.sub, role: 'user' });
+
+    return res.json({ success: true, data: { status: 'accepted' } });
+  } catch (error) {
+    console.error("Accept invite error:", error);
+    return res.status(500).json({ success: false, error: "Gagal menerima undangan" });
+  }
+});
+
+// PATCH /rooms/:id/invites/:inviteId/reject
+router.patch("/:id/invites/:inviteId/reject", async (req, res) => {
+  try {
+    const { inviteId } = req.params;
+
+    const { data: invite } = await supabaseAdmin
+      .from('room_invite_data')
+      .select('invitee_id, status')
+      .eq('message_id', inviteId)
+      .single();
+
+    if (!invite || invite.invitee_id !== req.user.sub || invite.status !== 'pending') {
+      return res.status(400).json({ success: false, error: "Undangan tidak valid" });
+    }
+
+    await supabaseAdmin
+      .from('room_invite_data')
+      .update({ status: 'rejected' })
+      .eq('message_id', inviteId);
+
+    return res.json({ success: true, data: { status: 'rejected' } });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: "Gagal menolak undangan" });
   }
 });
 
@@ -350,7 +460,7 @@ router.get("/:id/messages", async (req, res) => {
     const { data: messages, error } = await supabaseAdmin
       .from("messages")
       .select(
-        `*, sender:users!sender_id(id, username, full_name, avatar_url)`,
+        `*, sender:users!sender_id(id, username, full_name, avatar_url), templates!template_id(type), room_invite_data(*)`,
       )
       .eq("room_id", id)
       .order("created_at", { ascending: true })
@@ -363,14 +473,41 @@ router.get("/:id/messages", async (req, res) => {
 
     console.log(`[DEBUG] Found ${messages?.length || 0} messages`);
 
-    const formattedMessages = messages.map((m) => ({
-      id: m.id,
-      sender_id: m.sender_id || m.user_id,
-      sender_username: m.sender?.username || "Gokil User",
-      sender_full_name: m.sender?.full_name,
-      sender_avatar: m.sender?.avatar_url,
-      content: m.content,
-      created_at: m.created_at,
+    // Tambah info target_room di map, karena room_invite_data punya target_room_id
+    // Untuk nampilin info grup di chat DM, idealnya kita select nama & avatar grup juga,
+    // tapi buat MVP cukup kirim datanya aja
+    const formattedMessages = await Promise.all(messages.map(async (m) => {
+      let inviteInfo = null;
+      if (m.templates?.type === "room_invite" && m.room_invite_data?.length > 0) {
+        const inviteData = m.room_invite_data[0];
+        
+        // Fetch group info for the invite card
+        const { data: targetRoom } = await supabaseAdmin
+          .from("rooms")
+          .select("name, avatar_url")
+          .eq("id", inviteData.target_room_id)
+          .single();
+          
+        inviteInfo = {
+          invitee_id: inviteData.invitee_id,
+          status: inviteData.status,
+          target_room_id: inviteData.target_room_id,
+          target_room_name: targetRoom?.name || "Grup",
+          target_room_avatar: targetRoom?.avatar_url
+        };
+      }
+
+      return {
+        id: m.id,
+        sender_id: m.sender_id || m.user_id,
+        sender_username: m.sender?.username || "Gokil User",
+        sender_full_name: m.sender?.full_name,
+        sender_avatar: m.sender?.avatar_url,
+        content: m.content,
+        created_at: m.created_at,
+        template_type: m.templates?.type || "text",
+        invite_info: inviteInfo
+      };
     }));
 
     return res.json({ success: true, data: formattedMessages });
@@ -379,6 +516,114 @@ router.get("/:id/messages", async (req, res) => {
     return res
       .status(500)
       .json({ success: false, error: "Gagal mengambil pesan" });
+  }
+});
+
+// POST /rooms/join
+router.post('/join', async (req, res) => {
+  try {
+    const { invite_token } = req.body;
+    if (!invite_token) {
+      return res.status(400).json({ success: false, error: "Token undangan tidak valid" });
+    }
+
+    const { data: room, error: roomError } = await supabaseAdmin
+      .from('rooms')
+      .select('id, type')
+      .eq('invite_token', invite_token)
+      .eq('type', 'group')
+      .single();
+
+    if (roomError || !room) {
+      return res.status(404).json({ success: false, error: "Grup tidak ditemukan atau token tidak valid" });
+    }
+
+    // Check if already a member
+    const { data: existingMember } = await supabaseAdmin
+      .from('room_members')
+      .select('user_id')
+      .eq('room_id', room.id)
+      .eq('user_id', req.user.sub)
+      .maybeSingle();
+
+    if (existingMember) {
+      return res.json({ success: true, data: { room_id: room.id, role: "user" } });
+    }
+
+    // Insert to room_members
+    const { error: insertError } = await supabaseAdmin
+      .from('room_members')
+      .insert({
+        room_id: room.id,
+        user_id: req.user.sub,
+        role: 'user'
+      });
+
+    if (insertError) throw insertError;
+
+    return res.json({ success: true, data: { room_id: room.id, role: 'user' } });
+  } catch (error) {
+    console.error("Join room error:", error);
+    return res.status(500).json({ success: false, error: "Gagal bergabung dengan grup" });
+  }
+});
+
+// GET /rooms/invite/:token - Preview room before joining
+router.get('/invite/:token', async (req, res) => {
+  try {
+    const { token } = req.params;
+    const { data: room, error } = await supabaseAdmin
+      .from('rooms')
+      .select('id, name, avatar_url, type')
+      .eq('invite_token', token)
+      .eq('type', 'group')
+      .single();
+
+    if (error || !room) {
+      return res.status(404).json({ success: false, error: "Link undangan tidak valid atau kedaluwarsa" });
+    }
+    
+    // Get member count
+    const { count } = await supabaseAdmin
+      .from('room_members')
+      .select('id', { count: 'exact', head: true })
+      .eq('room_id', room.id);
+
+    return res.json({ success: true, data: { ...room, member_count: count } });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: "Gagal mengambil data undangan" });
+  }
+});
+
+// POST /rooms/:id/invite-token/regenerate
+router.post('/:id/invite-token/regenerate', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Cek auth owner
+    const { data: member } = await supabaseAdmin
+      .from('room_members')
+      .select('role')
+      .eq('room_id', id)
+      .eq('user_id', req.user.sub)
+      .single();
+      
+    if (!member || member.role !== 'owner') {
+      return res.status(403).json({ success: false, error: "Hanya owner yang bisa mengubah link undangan" });
+    }
+    
+    const new_invite_token = Math.random().toString(36).substring(2, 8);
+    
+    const { error } = await supabaseAdmin
+      .from('rooms')
+      .update({ invite_token: new_invite_token })
+      .eq('id', id);
+      
+    if (error) throw error;
+    
+    return res.json({ success: true, data: { invite_token: new_invite_token } });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: "Gagal memperbarui link undangan" });
   }
 });
 
