@@ -317,7 +317,7 @@ router.post("/:id/invites/:userId", async (req, res) => {
       // Fetch data lengkap untuk socket emit
       const { data: targetRoom } = await supabaseAdmin
         .from('rooms')
-        .select('name, avatar_url')
+        .select('name')
         .eq('id', id)
         .single();
         
@@ -541,7 +541,7 @@ router.get("/:id/messages", async (req, res) => {
         // Fetch group info for the invite card
         const { data: targetRoom } = await supabaseAdmin
           .from("rooms")
-          .select("name, avatar_url")
+          .select("name")
           .eq("id", inviteData.target_room_id)
           .single();
           
@@ -631,7 +631,7 @@ router.get('/invite/:token', async (req, res) => {
     const { token } = req.params;
     const { data: room, error } = await supabaseAdmin
       .from('rooms')
-      .select('id, name, avatar_url, type')
+      .select('id, name, type')
       .eq('invite_token', token)
       .eq('type', 'group')
       .single();
