@@ -26,7 +26,8 @@ export const authMiddleware = async (req, res, next) => {
     req.token = token;
     next();
   } catch (error) {
-    return res.status(401).json({ success: false, error: 'Token tidak valid' });
+    console.error('Auth middleware error:', error);
+    return res.status(401).json({ success: false, error: 'Token tidak valid: ' + (error.message || error.toString()) });
   }
 };
 
