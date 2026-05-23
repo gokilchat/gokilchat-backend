@@ -39,4 +39,6 @@ export default function initSocket(httpServer) {
       onlineUsers.delete(socket.user.id);
     });
   });
+
+  return io;
 }

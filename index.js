@@ -23,7 +23,8 @@ app.use('/users', usersRoutes);
 
 // Socket.io initialization
 import initSocket from './src/socket/index.js';
-initSocket(server);
+const io = initSocket(server);
+app.set('io', io);
 
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', message: 'Chat Server is running' });

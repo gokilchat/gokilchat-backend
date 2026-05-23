@@ -313,6 +313,48 @@ router.post("/:id/invites/:userId", async (req, res) => {
         });
 
       if (inviteError) throw inviteError;
+      
+      // Fetch data lengkap untuk socket emit
+      const { data: targetRoom } = await supabaseAdmin
+        .from('rooms')
+        .select('name, avatar_url')
+        .eq('id', id)
+        .single();
+        
+      const { data: senderInfo } = await supabaseAdmin
+        .from('users')
+        .select('username, full_name, avatar_url')
+        .eq('id', req.user.sub)
+        .single();
+
+      const formattedMessage = {
+        id: msg.id,
+        room_id: dmRoomId,
+        sender_id: req.user.sub,
+        sender_username: senderInfo?.username || "System",
+        sender_full_name: senderInfo?.full_name,
+        sender_avatar: senderInfo?.avatar_url,
+        content: null,
+        created_at: new Date().toISOString(),
+        template_type: "room_invite",
+        invite_info: {
+          invitee_id: userId,
+          status: "pending",
+          target_room_id: id,
+          target_room_name: targetRoom?.name || "Grup",
+          target_room_avatar: targetRoom?.avatar_url
+        }
+      };
+
+      const io = req.app.get('io');
+      if (io) {
+        // Emit ke room DM (target format yang ada di socket_events-v2.md)
+        io.to(`room:${dmRoomId}`).emit('message:new', formattedMessage);
+        
+        // PENTING: Karena user mungkin belum ada di DM room, 
+        // kita juga push notif personal ke invitee_id (supaya sidebar nya ke-update)
+        io.to(`user:${userId}`).emit('message:new', formattedMessage);
+      }
 
       return res.json({
         success: true,
@@ -478,9 +520,9 @@ router.get("/:id/messages", async (req, res) => {
     // tapi buat MVP cukup kirim datanya aja
     const formattedMessages = await Promise.all(messages.map(async (m) => {
       let inviteInfo = null;
-      if (m.templates?.type === "room_invite" && m.room_invite_data?.length > 0) {
-        const inviteData = m.room_invite_data[0];
-        
+      const inviteData = Array.isArray(m.room_invite_data) ? m.room_invite_data[0] : m.room_invite_data;
+      
+      if (m.templates?.type === "room_invite" && inviteData) {
         // Fetch group info for the invite card
         const { data: targetRoom } = await supabaseAdmin
           .from("rooms")
