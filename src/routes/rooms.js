@@ -208,7 +208,7 @@ router.get("/:id", async (req, res) => {
 
     const { data: room, error: rError } = await supabaseAdmin
       .from("rooms")
-      .select("*")
+      .select("*, members:room_members(role, joined_at, user:users(id, username, full_name, avatar_url))")
       .eq("id", id)
       .single();
 
