@@ -112,12 +112,18 @@ router.get("/", async (req, res) => {
             lmError,
           );
 
+        const { count: membersCount } = await supabaseAdmin
+          .from("room_members")
+          .select("*", { count: 'exact', head: true })
+          .eq("room_id", room.id);
+
         return {
           id: room.id,
           name: roomName,
           avatar_url: roomAvatar,
           dm_user_id: room.dm_user_id,
           type: room.type,
+          members_count: membersCount || 1,
           last_message: lastMsg
             ? {
                 content: lastMsg.content,
@@ -289,6 +295,14 @@ router.post("/:id/invites/:userId", async (req, res) => {
         .insert({ room_id: id, user_id: userId, role: "user" });
 
       if (insertError) throw insertError;
+
+      const io = req.app.get("io");
+      if (io) {
+        // Beri tahu user yang diinvite biar sidebar-nya update realtime
+        io.to(`user:${userId}`).emit("room:added", { room_id: id });
+        // Beri tahu member lain di room
+        io.to(`room:${id}`).emit("room:member_joined", { room_id: id, user_id: userId });
+      }
 
       return res.json({
         success: true,
@@ -546,6 +560,70 @@ router.post("/:id/leave", async (req, res) => {
   }
 });
 
+// DELETE /rooms/:id/members/:userId - Kick member (Admin/Owner only)
+router.delete("/:id/members/:userId", async (req, res) => {
+  try {
+    const { id, userId } = req.params;
+
+    // 1. Check requester role
+    const { data: requester } = await supabaseAdmin
+      .from("room_members")
+      .select("role")
+      .eq("room_id", id)
+      .eq("user_id", req.user.sub)
+      .single();
+
+    if (!requester || (requester.role !== "owner" && requester.role !== "admin")) {
+      return res.status(403).json({ success: false, error: "Hanya Admin/Owner yang bisa kick member" });
+    }
+
+    // 2. Check target role
+    const { data: targetMember } = await supabaseAdmin
+      .from("room_members")
+      .select("role")
+      .eq("room_id", id)
+      .eq("user_id", userId)
+      .single();
+
+    if (!targetMember) {
+      return res.status(404).json({ success: false, error: "Member tidak ditemukan" });
+    }
+
+    // Rules
+    if (requester.role === "admin" && (targetMember.role === "owner" || targetMember.role === "admin")) {
+      return res.status(403).json({ success: false, error: "Admin tidak bisa kick Owner atau sesama Admin" });
+    }
+    if (requester.role === "owner" && targetMember.role === "owner") {
+      return res.status(400).json({ success: false, error: "Owner tidak bisa kick diri sendiri, gunakan fitur leave" });
+    }
+
+    // 3. Delete member
+    const { error } = await supabaseAdmin
+      .from("room_members")
+      .delete()
+      .eq("room_id", id)
+      .eq("user_id", userId);
+
+    if (error) throw error;
+
+    // 4. Emit socket events
+    const io = req.app.get("io");
+    if (io) {
+      io.to(`user:${userId}`).emit("room:kicked", { room_id: id });
+      io.to(`room:${id}`).emit("room:member_left", {
+        room_id: id,
+        user_id: userId,
+        new_owner_id: null
+      });
+    }
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("Kick member error:", error);
+    return res.status(500).json({ success: false, error: "Gagal kick member" });
+  }
+});
+
 // POST /rooms/:id/clear
 router.post("/:id/clear", async (req, res) => {
   try {
@@ -572,7 +650,7 @@ router.get("/:id/messages", async (req, res) => {
     const { data: messages, error } = await supabaseAdmin
       .from("messages")
       .select(
-        `*, sender:users!sender_id(id, username, full_name, avatar_url), templates!template_id(type), room_invite_data(*)`,
+        `*, sender:users!sender_id(id, username, full_name, avatar_url), templates!template_id(type), room_invite_data(*), message_receipts(*, user:users!user_id(username, full_name, avatar_url))`
       )
       .eq("room_id", id)
       .order("created_at", { ascending: true })
@@ -622,6 +700,7 @@ router.get("/:id/messages", async (req, res) => {
           created_at: m.created_at,
           template_type: m.templates?.type || "text",
           invite_info: inviteInfo,
+          receipts: m.message_receipts || [],
         };
       }),
     );

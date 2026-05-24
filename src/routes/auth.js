@@ -43,15 +43,6 @@ router.post('/google', async (req, res) => {
     if (existingUsers && existingUsers.length > 0) {
       // User exists
       user = existingUsers[0];
-
-      // Sync latest profile from Google
-      await supabaseAdmin
-        .from('users')
-        .update({ avatar_url: picture, full_name: name })
-        .eq('id', user.id);
-      
-      user.avatar_url = picture; // update local object
-      user.full_name = name;
       
       // Get auth.users id
       const { data: authUsers, error: authSearchError } = await supabaseAdmin.auth.admin.listUsers();

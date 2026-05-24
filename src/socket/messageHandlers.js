@@ -191,4 +191,107 @@ export default function registerMessageHandlers(io, socket, onlineUsers) {
       console.error('message:unhide error:', error);
     }
   });
+
+  socket.on('message:delivered', async (payload) => {
+    try {
+      const { message_id, room_id } = payload;
+      
+      const { data: existing } = await supabaseAdmin
+        .from('message_receipts')
+        .select('delivered_at')
+        .eq('message_id', message_id)
+        .eq('user_id', socket.user.id)
+        .maybeSingle();
+        
+      if (existing && existing.delivered_at) return;
+      
+      const now = new Date().toISOString();
+      const receipt = {
+        message_id,
+        user_id: socket.user.id,
+        delivered_at: now,
+        read_at: null
+      };
+      
+      const { error } = await supabaseAdmin.from('message_receipts').upsert(receipt);
+      if (!error) {
+        const { data: userData } = await supabaseAdmin
+          .from('users')
+          .select('username, full_name, avatar_url')
+          .eq('id', socket.user.id)
+          .single();
+        
+        io.to(room_id).emit('receipt:update:batch', {
+          room_id,
+          receipts: [{ ...receipt, user: userData }]
+        });
+      }
+    } catch (error) {
+      console.error('message:delivered error:', error);
+    }
+  });
+
+  socket.on('message:read:room', async (payload) => {
+    try {
+      const { room_id } = payload;
+      const now = new Date().toISOString();
+      
+      // Ambil pesan di room ini yang bukan dikirim oleh user sendiri
+      const { data: messages } = await supabaseAdmin
+        .from('messages')
+        .select('id')
+        .eq('room_id', room_id)
+        .neq('sender_id', socket.user.id);
+        
+      if (!messages || messages.length === 0) return;
+      
+      const messageIds = messages.map(m => m.id);
+      const { data: existingReceipts } = await supabaseAdmin
+        .from('message_receipts')
+        .select('message_id, delivered_at, read_at')
+        .in('message_id', messageIds)
+        .eq('user_id', socket.user.id);
+        
+      const existingMap = new Map();
+      if (existingReceipts) {
+        existingReceipts.forEach(r => existingMap.set(r.message_id, r));
+      }
+      
+      const upserts = [];
+      const updatesToBroadcast = [];
+      
+      for (const msgId of messageIds) {
+        const existing = existingMap.get(msgId);
+        if (existing && existing.read_at) continue; // Udah dibaca, skip
+        
+        const receipt = {
+          message_id: msgId,
+          user_id: socket.user.id,
+          delivered_at: existing?.delivered_at || now,
+          read_at: now
+        };
+        upserts.push(receipt);
+        updatesToBroadcast.push(receipt);
+      }
+      
+      if (upserts.length > 0) {
+        await supabaseAdmin.from('message_receipts').upsert(upserts);
+        
+        const { data: userData } = await supabaseAdmin
+          .from('users')
+          .select('username, full_name, avatar_url')
+          .eq('id', socket.user.id)
+          .single();
+          
+        const broadcasts = updatesToBroadcast.map(r => ({ ...r, user: userData }));
+        
+        io.to(room_id).emit('receipt:update:batch', {
+          room_id,
+          receipts: broadcasts
+        });
+      }
+    } catch (error) {
+      console.error('message:read:room error:', error);
+    }
+  });
 }
