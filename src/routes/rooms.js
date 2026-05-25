@@ -618,47 +618,62 @@ router.post("/:id/leave", async (req, res) => {
 router.delete("/:id/members/:userId", async (req, res) => {
   try {
     const { id, userId } = req.params;
+    console.log(`[KICK] Requester: ${req.user?.sub}, Room: ${id}, Target: ${userId}`);
 
     // 1. Check requester role
-    const { data: requester } = await supabaseAdmin
+    const { data: requester, error: reqError } = await supabaseAdmin
       .from("room_members")
       .select("role")
       .eq("room_id", id)
       .eq("user_id", req.user.sub)
       .single();
 
+    if (reqError) {
+      console.error("[KICK] Failed to fetch requester role:", reqError);
+    }
+
     if (!requester || (requester.role !== "owner" && requester.role !== "admin")) {
+      console.log(`[KICK] Access denied. Requester role: ${requester?.role}`);
       return res.status(403).json({ success: false, error: "Hanya Admin/Owner yang bisa kick member" });
     }
 
     // 2. Check target role
-    const { data: targetMember } = await supabaseAdmin
+    const { data: targetMember, error: targetError } = await supabaseAdmin
       .from("room_members")
       .select("role")
       .eq("room_id", id)
       .eq("user_id", userId)
       .single();
 
-    if (!targetMember) {
+    if (targetError || !targetMember) {
+      console.log(`[KICK] Target member not found. Error:`, targetError);
       return res.status(404).json({ success: false, error: "Member tidak ditemukan" });
     }
 
     // Rules
     if (requester.role === "admin" && (targetMember.role === "owner" || targetMember.role === "admin")) {
+      console.log(`[KICK] Rule violation: Admin trying to kick owner/admin`);
       return res.status(403).json({ success: false, error: "Admin tidak bisa kick Owner atau sesama Admin" });
     }
     if (requester.role === "owner" && targetMember.role === "owner") {
+      console.log(`[KICK] Rule violation: Owner trying to kick themselves`);
       return res.status(400).json({ success: false, error: "Owner tidak bisa kick diri sendiri, gunakan fitur leave" });
     }
 
     // 3. Delete member
+    console.log(`[KICK] Executing database delete for room: ${id}, user: ${userId}`);
     const { error } = await supabaseAdmin
       .from("room_members")
       .delete()
       .eq("room_id", id)
       .eq("user_id", userId);
 
-    if (error) throw error;
+    if (error) {
+      console.error("[KICK] Database delete failed:", error);
+      throw error;
+    }
+
+    console.log(`[KICK] Successfully deleted member from room_members. Emitting sockets...`);
 
     // 4. Emit socket events
     const io = req.app.get("io");
@@ -669,6 +684,7 @@ router.delete("/:id/members/:userId", async (req, res) => {
         user_id: userId,
         new_owner_id: null
       });
+      console.log(`[KICK] Emitted room:kicked to user:${userId} and room:member_left to room:${id}`);
     }
 
     return res.json({ success: true });
