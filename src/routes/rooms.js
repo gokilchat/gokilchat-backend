@@ -483,6 +483,60 @@ router.patch("/:id/invites/:inviteId/reject", async (req, res) => {
       .json({ success: false, error: "Gagal menolak undangan" });
   }
 });
+// PATCH /rooms/:id - Update room details (name, description)
+router.patch("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description } = req.body;
+
+    // Check if requester is admin/owner
+    const { data: requester, error: rError } = await supabaseAdmin
+      .from("room_members")
+      .select("role")
+      .eq("room_id", id)
+      .eq("user_id", req.user.sub)
+      .single();
+
+    if (rError || !requester || (requester.role !== "owner" && requester.role !== "admin")) {
+      return res.status(403).json({
+        success: false,
+        error: "Hanya Admin/Owner yang bisa mengubah informasi grup",
+      });
+    }
+
+    const updates = {};
+    if (name !== undefined) updates.name = name;
+    if (description !== undefined) updates.description = description;
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ success: false, error: "Tidak ada data yang diubah" });
+    }
+
+    const { data: updatedRoom, error: updateError } = await supabaseAdmin
+      .from("rooms")
+      .update(updates)
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (updateError) throw updateError;
+
+    // Emit event via Socket.IO if needed
+    const io = req.app.get("io");
+    if (io) {
+      io.to(`room:${id}`).emit("room:updated", {
+        room_id: id,
+        name: updatedRoom.name,
+        description: updatedRoom.description,
+      });
+    }
+
+    return res.json({ success: true, data: updatedRoom });
+  } catch (error) {
+    console.error("Update room error:", error);
+    return res.status(500).json({ success: false, error: "Gagal memperbarui informasi grup" });
+  }
+});
 
 // DELETE /rooms/:id - Delete group room
 router.delete("/:id", async (req, res) => {
