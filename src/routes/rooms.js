@@ -441,6 +441,15 @@ router.patch("/:id/invites/:inviteId/accept", async (req, res) => {
         role: "user",
       });
 
+    const io = req.app.get("io");
+    if (io) {
+      io.to(`user:${req.user.sub}`).emit("room:added", { room_id: invite.target_room_id });
+      io.to(`room:${invite.target_room_id}`).emit("room:member_joined", {
+        room_id: invite.target_room_id,
+        user_id: req.user.sub,
+      });
+    }
+
     return res.json({ success: true, data: { status: "accepted" } });
   } catch (error) {
     console.error("Accept invite error:", error);
@@ -835,6 +844,15 @@ router.post("/join", async (req, res) => {
       });
 
     if (insertError) throw insertError;
+
+    const io = req.app.get("io");
+    if (io) {
+      io.to(`user:${req.user.sub}`).emit("room:added", { room_id: room.id });
+      io.to(`room:${room.id}`).emit("room:member_joined", {
+        room_id: room.id,
+        user_id: req.user.sub,
+      });
+    }
 
     return res.json({
       success: true,
