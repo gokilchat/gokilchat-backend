@@ -783,6 +783,7 @@ router.get("/:id/messages", async (req, res) => {
 
         return {
           id: m.id,
+          room_id: m.room_id,
           sender_id: m.sender_id || m.user_id,
           sender_username: m.sender?.username || "Gokil User",
           sender_full_name: m.sender?.full_name,
