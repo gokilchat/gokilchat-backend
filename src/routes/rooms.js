@@ -599,22 +599,34 @@ router.post("/:id/leave", async (req, res) => {
       .eq("room_id", req.params.id)
       .order("joined_at", { ascending: true });
 
+    let newOwnerId = null;
+
     if (!rmError && remainingMembers && remainingMembers.length === 0) {
       await supabaseAdmin.from("rooms").delete().eq("id", req.params.id);
     } else if (!rmError && isOwner && remainingMembers && remainingMembers.length > 0) {
       // Owner keluar, angkat member terlama (paling atas di order joined_at) jadi owner baru 🗿
-      const nextOwnerId = remainingMembers[0].user_id;
+      newOwnerId = remainingMembers[0].user_id;
       
       await supabaseAdmin
         .from("room_members")
         .update({ role: "owner" })
         .eq("room_id", req.params.id)
-        .eq("user_id", nextOwnerId);
+        .eq("user_id", newOwnerId);
         
       await supabaseAdmin
         .from("rooms")
-        .update({ owner_id: nextOwnerId })
+        .update({ owner_id: newOwnerId })
         .eq("id", req.params.id);
+    }
+
+    // Emit event ke member lain bahwa user telah leave room
+    const io = req.app.get("io");
+    if (io) {
+      io.to(`room:${req.params.id}`).emit("room:member_left", {
+        room_id: req.params.id,
+        user_id: req.user.sub,
+        new_owner_id: newOwnerId
+      });
     }
 
     return res.json({ success: true });
