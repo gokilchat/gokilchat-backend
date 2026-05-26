@@ -231,6 +231,68 @@ export default function registerMessageHandlers(io, socket, onlineUsers) {
     }
   });
 
+  socket.on('messages:delivered:room', async (payload) => {
+    try {
+      const { room_id } = payload;
+      const now = new Date().toISOString();
+      
+      // Ambil pesan di room ini yang bukan dikirim oleh user sendiri
+      const { data: messages } = await supabaseAdmin
+        .from('messages')
+        .select('id')
+        .eq('room_id', room_id)
+        .neq('sender_id', socket.user.id);
+        
+      if (!messages || messages.length === 0) return;
+      
+      const messageIds = messages.map(m => m.id);
+      const { data: existingReceipts } = await supabaseAdmin
+        .from('message_receipts')
+        .select('message_id, delivered_at, read_at')
+        .in('message_id', messageIds)
+        .eq('user_id', socket.user.id);
+        
+      const existingMap = new Map();
+      if (existingReceipts) {
+        existingReceipts.forEach(r => existingMap.set(r.message_id, r));
+      }
+      
+      const upserts = [];
+      const updatesToBroadcast = [];
+      
+      for (const msgId of messageIds) {
+        const existing = existingMap.get(msgId);
+        if (existing && existing.delivered_at) continue; // Udah delivered, skip
+        
+        const receipt = {
+          message_id: msgId,
+          user_id: socket.user.id,
+          delivered_at: now,
+          read_at: existing?.read_at || null
+        };
+        upserts.push(receipt);
+        updatesToBroadcast.push(receipt);
+      }
+      
+      if (upserts.length > 0) {
+        await supabaseAdmin.from('message_receipts').upsert(upserts);
+        
+        const { data: userData } = await supabaseAdmin
+          .from('users')
+          .select('username, full_name, avatar_url')
+          .eq('id', socket.user.id)
+          .single();
+          
+        io.to(room_id).emit('receipt:update:batch', {
+          room_id,
+          receipts: updatesToBroadcast.map(r => ({ ...r, user: userData }))
+        });
+      }
+    } catch (error) {
+      console.error('messages:delivered:room error:', error);
+    }
+  });
+
   socket.on('message:read:room', async (payload) => {
     try {
       const { room_id } = payload;
