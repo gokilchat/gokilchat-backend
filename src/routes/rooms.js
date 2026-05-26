@@ -301,7 +301,7 @@ router.post("/:id/invites/:userId", async (req, res) => {
         // Beri tahu user yang diinvite biar sidebar-nya update realtime
         io.to(`user:${userId}`).emit("room:added", { room_id: id });
         // Beri tahu member lain di room
-        io.to(`room:${id}`).emit("room:member_joined", { room_id: id, user_id: userId });
+        io.to(id).emit("room:member_joined", { room_id: id, user_id: userId });
       }
 
       return res.json({
@@ -373,7 +373,7 @@ router.post("/:id/invites/:userId", async (req, res) => {
       const io = req.app.get("io");
       if (io) {
         // Emit ke room DM (target format yang ada di socket_events-v2.md)
-        io.to(`room:${dmRoomId}`).emit("message:new", formattedMessage);
+        io.to(dmRoomId).emit("message:new", formattedMessage);
 
         // PENTING: Karena user mungkin belum ada di DM room,
         // kita juga push notif personal ke invitee_id (supaya sidebar nya ke-update)
@@ -444,7 +444,7 @@ router.patch("/:id/invites/:inviteId/accept", async (req, res) => {
     const io = req.app.get("io");
     if (io) {
       io.to(`user:${req.user.sub}`).emit("room:added", { room_id: invite.target_room_id });
-      io.to(`room:${invite.target_room_id}`).emit("room:member_joined", {
+      io.to(invite.target_room_id).emit("room:member_joined", {
         room_id: invite.target_room_id,
         user_id: req.user.sub,
       });
@@ -533,7 +533,7 @@ router.patch("/:id", async (req, res) => {
     // Emit event via Socket.IO if needed
     const io = req.app.get("io");
     if (io) {
-      io.to(`room:${id}`).emit("room:updated", {
+      io.to(id).emit("room:updated", {
         room_id: id,
         name: updatedRoom.name,
         description: updatedRoom.description,
@@ -622,7 +622,7 @@ router.post("/:id/leave", async (req, res) => {
     // Emit event ke member lain bahwa user telah leave room
     const io = req.app.get("io");
     if (io) {
-      io.to(`room:${req.params.id}`).emit("room:member_left", {
+      io.to(req.params.id).emit("room:member_left", {
         room_id: req.params.id,
         user_id: req.user.sub,
         new_owner_id: newOwnerId
@@ -700,7 +700,7 @@ router.delete("/:id/members/:userId", async (req, res) => {
     const io = req.app.get("io");
     if (io) {
       io.to(`user:${userId}`).emit("room:kicked", { room_id: id });
-      io.to(`room:${id}`).emit("room:member_left", {
+      io.to(id).emit("room:member_left", {
         room_id: id,
         user_id: userId,
         new_owner_id: null
@@ -861,7 +861,7 @@ router.post("/join", async (req, res) => {
     const io = req.app.get("io");
     if (io) {
       io.to(`user:${req.user.sub}`).emit("room:added", { room_id: room.id });
-      io.to(`room:${room.id}`).emit("room:member_joined", {
+      io.to(room.id).emit("room:member_joined", {
         room_id: room.id,
         user_id: req.user.sub,
       });
