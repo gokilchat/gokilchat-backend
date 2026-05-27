@@ -46,7 +46,7 @@ router.get('/:id', async (req, res) => {
     const { id } = req.params;
     const { data: user, error } = await supabaseAdmin
       .from('users')
-      .select('id, username, full_name, avatar_url, system_role, settings:user_settings(group_invite_privacy)')
+      .select('id, username, full_name, avatar_url, system_role, created_at, settings:user_settings(group_invite_privacy)')
       .eq('id', id)
       .single();
 

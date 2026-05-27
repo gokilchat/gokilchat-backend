@@ -1,6 +1,12 @@
 import express from "express";
 import { supabaseUser, supabaseAdmin } from "../lib/supabase.js";
 import { authMiddleware } from "../middlewares/auth.js";
+import multer from 'multer';
+
+const upload = multer({ 
+  storage: multer.memoryStorage(), 
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB max
+});
 
 const router = express.Router();
 
@@ -96,11 +102,13 @@ router.get("/", async (req, res) => {
             roomAvatar = otherMember.users?.avatar_url;
             room.dm_user_id = otherMember.user_id;
           }
+        } else {
+          roomAvatar = room.avatar_url;
         }
 
         const { data: lastMsg, error: lmError } = await supabaseAdmin
           .from("messages")
-          .select(`content, created_at, sender:users!sender_id(username)`)
+          .select(`content, created_at, sender:users!sender_id(username, full_name), templates(type)`)
           .eq("room_id", room.id)
           .order("created_at", { ascending: false })
           .limit(1)
@@ -117,6 +125,13 @@ router.get("/", async (req, res) => {
           .select("*", { count: 'exact', head: true })
           .eq("room_id", room.id);
 
+        const { count: unreadCount } = await supabaseAdmin
+          .from("message_receipts")
+          .select("message_id, messages!inner(room_id)", { count: "exact", head: true })
+          .eq("user_id", req.user.sub)
+          .is("read_at", null)
+          .eq("messages.room_id", room.id);
+
         return {
           id: room.id,
           name: roomName,
@@ -124,11 +139,13 @@ router.get("/", async (req, res) => {
           dm_user_id: room.dm_user_id,
           type: room.type,
           members_count: membersCount || 1,
+          unread_count: unreadCount || 0,
           last_message: lastMsg
             ? {
                 content: lastMsg.content,
-                sender_username: lastMsg.sender?.username,
+                sender: lastMsg.sender,
                 created_at: lastMsg.created_at,
+                template_type: lastMsg.templates?.type || "text",
               }
             : null,
         };
@@ -420,34 +437,52 @@ router.patch("/:id/invites/:inviteId/accept", async (req, res) => {
         });
     }
 
+    if (invite.status === "accepted") {
+      return res.json({ success: true, data: { status: "accepted" } });
+    }
+
     if (invite.status !== "pending") {
       return res
         .status(400)
         .json({ success: false, error: "Undangan sudah tidak berlaku" });
     }
 
-    // Update status
+    // Cek apakah user udah jadi member grup tsb
+    const { data: existingMember } = await supabaseAdmin
+      .from("room_members")
+      .select("id")
+      .eq("room_id", invite.target_room_id)
+      .eq("user_id", req.user.sub)
+      .maybeSingle();
+
+    // Update SEMUA undangan yang pending untuk grup ini & user ini jadi accepted
     await supabaseAdmin
       .from("room_invite_data")
       .update({ status: "accepted" })
-      .eq("message_id", inviteId);
+      .eq("target_room_id", invite.target_room_id)
+      .eq("invitee_id", req.user.sub)
+      .eq("status", "pending");
 
-    // Join room
-    await supabaseAdmin
-      .from("room_members")
-      .insert({
-        room_id: invite.target_room_id,
-        user_id: req.user.sub,
-        role: "user",
-      });
+    if (!existingMember) {
+      // Join room kalo belum member
+      const { error: joinError } = await supabaseAdmin
+        .from("room_members")
+        .insert({
+          room_id: invite.target_room_id,
+          user_id: req.user.sub,
+          role: "user",
+        });
 
-    const io = req.app.get("io");
-    if (io) {
-      io.to(`user:${req.user.sub}`).emit("room:added", { room_id: invite.target_room_id });
-      io.to(invite.target_room_id).emit("room:member_joined", {
-        room_id: invite.target_room_id,
-        user_id: req.user.sub,
-      });
+      if (joinError) throw joinError;
+
+      const io = req.app.get("io");
+      if (io) {
+        io.to(`user:${req.user.sub}`).emit("room:added", { room_id: invite.target_room_id });
+        io.to(invite.target_room_id).emit("room:member_joined", {
+          room_id: invite.target_room_id,
+          user_id: req.user.sub,
+        });
+      }
     }
 
     return res.json({ success: true, data: { status: "accepted" } });
@@ -466,24 +501,39 @@ router.patch("/:id/invites/:inviteId/reject", async (req, res) => {
 
     const { data: invite } = await supabaseAdmin
       .from("room_invite_data")
-      .select("invitee_id, status")
+      .select("invitee_id, status, target_room_id")
       .eq("message_id", inviteId)
       .single();
 
-    if (
-      !invite ||
-      invite.invitee_id !== req.user.sub ||
-      invite.status !== "pending"
-    ) {
+    if (!invite || invite.invitee_id !== req.user.sub) {
+      return res
+        .status(403)
+        .json({ success: false, error: "Hanya yang diundang yang bisa menolak" });
+    }
+
+    if (invite.status === "rejected") {
+      return res.json({ success: true, data: { status: "rejected" } });
+    }
+
+    if (invite.status === "accepted") {
+      return res
+        .status(400)
+        .json({ success: false, error: "Lu udah join grup ini bang, gak bisa ditolak lagi" });
+    }
+
+    if (invite.status !== "pending") {
       return res
         .status(400)
         .json({ success: false, error: "Undangan tidak valid" });
     }
 
+    // Update semua pending invite untuk grup ini jadi rejected
     await supabaseAdmin
       .from("room_invite_data")
       .update({ status: "rejected" })
-      .eq("message_id", inviteId);
+      .eq("target_room_id", invite.target_room_id)
+      .eq("invitee_id", req.user.sub)
+      .eq("status", "pending");
 
     return res.json({ success: true, data: { status: "rejected" } });
   } catch (error) {
@@ -544,6 +594,77 @@ router.patch("/:id", async (req, res) => {
   } catch (error) {
     console.error("Update room error:", error);
     return res.status(500).json({ success: false, error: "Gagal memperbarui informasi grup" });
+  }
+});
+
+// POST /rooms/:id/avatar - Upload group avatar
+router.post("/:id/avatar", upload.single('avatar'), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'File gambar tidak ditemukan' });
+    }
+
+    // Check if requester is admin/owner
+    const { data: requester, error: rError } = await supabaseAdmin
+      .from("room_members")
+      .select("role")
+      .eq("room_id", id)
+      .eq("user_id", req.user.sub)
+      .single();
+
+    if (rError || !requester || (requester.role !== "owner" && requester.role !== "admin")) {
+      return res.status(403).json({
+        success: false,
+        error: "Hanya Admin/Owner yang bisa mengubah foto grup",
+      });
+    }
+
+    const file = req.file;
+    const fileExt = file.originalname.split('.').pop();
+    const fileName = `room-${id}-${Date.now()}.${fileExt}`;
+
+    // Upload to Supabase Storage (avatars bucket)
+    const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+      .from('avatars')
+      .upload(fileName, file.buffer, {
+        contentType: file.mimetype,
+        upsert: true
+      });
+
+    if (uploadError) throw uploadError;
+
+    // Get public URL
+    const { data: { publicUrl } } = supabaseAdmin.storage
+      .from('avatars')
+      .getPublicUrl(fileName);
+
+    // Update avatar_url in database
+    const { data: updatedRoom, error: updateError } = await supabaseAdmin
+      .from('rooms')
+      .update({ avatar_url: publicUrl })
+      .eq('id', id)
+      .select('*')
+      .single();
+
+    if (updateError) throw updateError;
+
+    // Emit event via Socket.IO
+    const io = req.app.get("io");
+    if (io) {
+      io.to(id).emit("room:updated", {
+        room_id: id,
+        name: updatedRoom.name,
+        description: updatedRoom.description,
+        avatar_url: updatedRoom.avatar_url,
+      });
+    }
+
+    return res.json({ success: true, data: { avatar_url: publicUrl } });
+  } catch (error) {
+    console.error('Upload room avatar error:', error); require('fs').writeFileSync('/tmp/avatar_error.txt', error.stack || error.toString());
+    return res.status(500).json({ success: false, error: 'Gagal mengupload foto grup' });
   }
 });
 
