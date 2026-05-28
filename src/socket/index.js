@@ -5,11 +5,17 @@ import registerMessageHandlers from './messageHandlers.js';
 import registerPresenceHandlers from './presenceHandlers.js';
 import registerRoomHandlers from './roomHandlers.js';
 import registerInviteHandlers from './inviteHandlers.js';
+import startSocketMonitor from './monitor.js';
 
 export default function initSocket(httpServer) {
+  const allowedOrigins = [
+    'http://localhost:3000',
+    process.env.FRONTEND_URL
+  ].filter(Boolean);
+
   const io = new Server(httpServer, {
     cors: {
-      origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+      origin: allowedOrigins,
       methods: ['GET', 'POST'],
       credentials: true,
     },
@@ -39,6 +45,11 @@ export default function initSocket(httpServer) {
       onlineUsers.delete(socket.user.id);
     });
   });
+
+  // Start the performance and active connections monitor (Toggle via .env)
+  if (process.env.ENABLE_SOCKET_MONITOR === 'true') {
+    startSocketMonitor(io, onlineUsers);
+  }
 
   return io;
 }
