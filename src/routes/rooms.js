@@ -1006,7 +1006,7 @@ router.get("/invite/:token", async (req, res) => {
     const { token } = req.params;
     const { data: room, error } = await supabaseAdmin
       .from("rooms")
-      .select("id, name, type")
+      .select("id, name, type, avatar_url")
       .eq("invite_token", token)
       .eq("type", "group")
       .single();
@@ -1026,7 +1026,15 @@ router.get("/invite/:token", async (req, res) => {
       .select("id", { count: "exact", head: true })
       .eq("room_id", room.id);
 
-    return res.json({ success: true, data: { ...room, member_count: count } });
+    // Check if user is already a member
+    const { data: existingMember } = await supabaseAdmin
+      .from("room_members")
+      .select("id")
+      .eq("room_id", room.id)
+      .eq("user_id", req.user.sub)
+      .maybeSingle();
+
+    return res.json({ success: true, data: { ...room, member_count: count, is_member: !!existingMember } });
   } catch (error) {
     return res
       .status(500)
