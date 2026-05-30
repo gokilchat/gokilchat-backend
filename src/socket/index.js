@@ -21,7 +21,7 @@ export default function initSocket(httpServer) {
     },
   });
 
-  const onlineUsers = new Map(); // userId -> socketId
+  const onlineUsers = new Map(); // userId -> Set of socketIds
 
   io.use(socketAuthMiddleware);
 
@@ -31,9 +31,21 @@ export default function initSocket(httpServer) {
     // Join personal room for targeted notifications
     socket.join(`user:${socket.user.id}`);
     
-    onlineUsers.set(socket.user.id, socket.id);
+    // Manage multi-connection socket IDs
+    if (!onlineUsers.has(socket.user.id)) {
+      onlineUsers.set(socket.user.id, new Set());
+    }
+    const userSockets = onlineUsers.get(socket.user.id);
+    const isFirstConnection = userSockets.size === 0;
+    userSockets.add(socket.id);
 
-    onlineUsers.set(socket.user.id, socket.id);
+    // Broadcast if this is the user's first connection (went online)
+    if (isFirstConnection) {
+      io.emit('presence:status', {
+        user_id: socket.user.id,
+        online: true
+      });
+    }
     
     registerMessageHandlers(io, socket, onlineUsers);
     registerPresenceHandlers(io, socket, onlineUsers);
@@ -42,7 +54,18 @@ export default function initSocket(httpServer) {
     
     socket.on('disconnect', () => {
       console.log('User disconnected:', socket.user.email);
-      onlineUsers.delete(socket.user.id);
+      const sockets = onlineUsers.get(socket.user.id);
+      if (sockets) {
+        sockets.delete(socket.id);
+        if (sockets.size === 0) {
+          onlineUsers.delete(socket.user.id);
+          // Broadcast if this was the user's last active connection (went offline)
+          io.emit('presence:status', {
+            user_id: socket.user.id,
+            online: false
+          });
+        }
+      }
     });
   });
 
