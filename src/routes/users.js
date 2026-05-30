@@ -26,6 +26,7 @@ router.get('/search', async (req, res) => {
       .from('users')
       .select('id, username, full_name, avatar_url')
       .or(`username.ilike.%${username}%,full_name.ilike.%${username}%`)
+      .eq('system_role', 'user') // Staff tidak terlihat oleh user biasa
       .limit(10);
 
     if (error) throw error;

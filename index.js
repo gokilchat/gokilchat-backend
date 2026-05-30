@@ -27,10 +27,14 @@ app.use(express.json());
 import authRoutes from './src/routes/auth.js';
 import roomRoutes from './src/routes/rooms.js';
 import usersRoutes from './src/routes/users.js';
+import adminRoutes from './src/routes/admin.js';
+import notificationRoutes from './src/routes/notifications.js';
 
 app.use('/auth', authRoutes);
 app.use('/rooms', roomRoutes);
 app.use('/users', usersRoutes);
+app.use('/admin', adminRoutes);
+app.use('/notifications', notificationRoutes);
 
 // Socket.io initialization
 import initSocket from './src/socket/index.js';

@@ -57,6 +57,11 @@ async function getOrCreateDmRoom(userId1, userId2) {
 // GET /rooms - Get all rooms with last message
 router.get("/", async (req, res) => {
   try {
+    // Staff/Admin tidak butuh data rooms karena mereka cuma pake Admin Panel
+    if (req.user.system_role === 'super_admin' || req.user.system_role === 'moderator') {
+      return res.json({ success: true, data: [] });
+    }
+
     // Pake supabaseAdmin buat bypass RLS sementara, karena policy "room_members_select"
     // di DB lo ternyata recursive (infinite loop) kalau pake supabaseUser.
     const { data: participants, error: pError } = await supabaseAdmin
@@ -85,7 +90,7 @@ router.get("/", async (req, res) => {
         if (room.type === "dm") {
           const { data: otherMember, error: omError } = await supabaseAdmin
             .from("room_members")
-            .select("user_id, users(username, full_name, avatar_url)")
+            .select("user_id, users(username, full_name, avatar_url, system_role, status)")
             .eq("room_id", room.id)
             .neq("user_id", req.user.sub)
             .maybeSingle();
@@ -97,10 +102,18 @@ router.get("/", async (req, res) => {
             );
 
           if (otherMember) {
+            // Sembunyikan DM dengan staff dari sidebar user biasa
+            const otherRole = otherMember.users?.system_role;
+            const callerIsStaff = ['super_admin', 'moderator'].includes(req.user.system_role);
+            if (!callerIsStaff && otherRole && otherRole !== 'user') {
+              return null; // Skip room ini
+            }
+
             roomName =
               otherMember.users?.full_name || otherMember.users?.username;
             roomAvatar = otherMember.users?.avatar_url;
             room.dm_user_id = otherMember.user_id;
+            room.dm_user_status = otherMember.users?.status;
           }
         } else {
           roomAvatar = room.avatar_url;
@@ -137,7 +150,9 @@ router.get("/", async (req, res) => {
           name: roomName,
           avatar_url: roomAvatar,
           dm_user_id: room.dm_user_id,
+          dm_user_status: room.dm_user_status,
           type: room.type,
+          owner_id: room.owner_id,
           members_count: membersCount || 1,
           unread_count: unreadCount || 0,
           last_message: lastMsg
@@ -152,7 +167,7 @@ router.get("/", async (req, res) => {
       }),
     );
 
-    return res.json({ success: true, data: formattedRooms });
+    return res.json({ success: true, data: formattedRooms.filter(Boolean) });
   } catch (error) {
     console.error("Fetch rooms error DETAIL:", error);
     return res
@@ -234,7 +249,7 @@ router.get("/:id", async (req, res) => {
     const { data: room, error: rError } = await supabaseAdmin
       .from("rooms")
       .select(
-        "*, members:room_members(role, joined_at, user:users(id, username, full_name, avatar_url))",
+        "*, members:room_members(role, joined_at, user:users(id, username, full_name, avatar_url, status))",
       )
       .eq("id", id)
       .single();
@@ -914,6 +929,10 @@ router.get("/:id/messages", async (req, res) => {
           template_type: m.templates?.type || "text",
           invite_info: inviteInfo,
           receipts: m.message_receipts || [],
+          parent_id: m.parent_id,
+          reply_preview: m.reply_preview,
+          deleted_at: m.deleted_at,
+          deleted_by: m.deleted_by,
         };
       }),
     );

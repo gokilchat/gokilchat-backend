@@ -11,15 +11,22 @@ export const authMiddleware = async (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.SUPABASE_JWT_SECRET);
     
-    // Ambil system_role dari public.users (Supabase JWT tidak menyimpan system_role)
+    // Ambil system_role dan status dari public.users (Supabase JWT tidak menyimpan system_role)
     const { data: user, error } = await supabaseAdmin
       .from('users')
-      .select('id, email, system_role')
+      .select('id, email, system_role, status')
       .eq('id', decoded.sub)
       .single();
 
     if (error || !user) {
       return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    if (user.status === 'suspended') {
+      return res.status(403).json({ success: false, error: 'Akun Anda ditangguhkan (Suspended).' });
+    }
+    if (user.status === 'banned') {
+      return res.status(403).json({ success: false, error: 'Akun Anda telah dibanned permanen.' });
     }
 
     req.user = { id: user.id, email: user.email, system_role: user.system_role, sub: decoded.sub };
@@ -42,12 +49,16 @@ export const socketAuthMiddleware = async (socket, next) => {
     
     const { data: user, error } = await supabaseAdmin
       .from('users')
-      .select('id, email, system_role')
+      .select('id, email, system_role, status')
       .eq('id', decoded.sub)
       .single();
 
     if (error || !user) {
       return next(new Error('Authentication error: User not found'));
+    }
+
+    if (user.status === 'suspended' || user.status === 'banned') {
+      return next(new Error('Authentication error: Account suspended or banned'));
     }
 
     socket.user = { id: user.id, email: user.email, system_role: user.system_role, sub: decoded.sub };
